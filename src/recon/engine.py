@@ -25,6 +25,9 @@ class Policy:
     accept_threshold: float = 0.995
     review_threshold: float = 0.80
     max_review_rate: float = 0.01
+    mdr_bps: int = 180
+    cod_fee_bps: int = 80
+    amount_tolerance: float = AMOUNT_TOLERANCE
 
 
 def validate_feed(frame: pd.DataFrame, feed: str) -> list[str]:
@@ -50,11 +53,12 @@ def _first_by(frame: pd.DataFrame, key: str) -> pd.DataFrame:
 
 
 def _extract_order_id(description: Any) -> str | None:
-    match = re.search(r"(ORD\d{4}-\d{7})", str(description))
+    text = str(description)
+    match = re.search(r"(ORD\d{4}-\d{7}|[0-9a-f]{32})", text, re.IGNORECASE)
     return match.group(1) if match else None
 
 
-def build_features(feeds: dict[str, pd.DataFrame]) -> pd.DataFrame:
+def build_features(feeds: dict[str, pd.DataFrame], policy: Policy = Policy()) -> pd.DataFrame:
     oms = _first_by(feeds["oms"], "order_id")
     bank = feeds["bank"].copy()
     bank["order_id"] = bank["description"].map(_extract_order_id)
@@ -73,23 +77,22 @@ def build_features(feeds: dict[str, pd.DataFrame]) -> pd.DataFrame:
     result["tracking_exact"] = result["tracking_no"].fillna("").eq(result["tracking_code"].fillna(""))
     result["amount_delta"] = result["credit_amount"].fillna(0) - result["order_amount"].fillna(0)
     result["cod_amount_delta"] = result["cod_collected"].fillna(0) - result["order_amount"].fillna(0)
-    result["expected_credit"] = (
-        result["order_amount"].fillna(0)
-        .where(result["payment_method"].eq("PREPAID"), result["cod_collected"].fillna(0)
-               - result["ship_fee"].fillna(0) - result["cod_fee"].fillna(0))
+    result["expected_credit"] = result["order_amount"].fillna(0).where(
+        result["payment_method"].eq("PREPAID"),
+        result["cod_collected"].fillna(0) - result["ship_fee"].fillna(0) - result["cod_fee"].fillna(0),
     )
     result["credit_delta"] = result["credit_amount"].fillna(0) - result["expected_credit"]
     result["expected_mdr"] = result["credit_amount"].fillna(0).where(
         result["payment_method"].eq("PREPAID"), 0
-    ).map(lambda x: fee(int(x), MDR_BPS))
-    result["expected_cod_fee"] = result["cod_collected"].fillna(0).map(lambda x: fee(int(x), COD_FEE_BPS))
+    ).map(lambda x: fee(int(x), policy.mdr_bps))
+    result["expected_cod_fee"] = result["cod_collected"].fillna(0).map(lambda x: fee(int(x), policy.cod_fee_bps))
     result["fee_delta"] = result["fee_amount"].fillna(0) - result["expected_mdr"]
     result["cod_fee_delta"] = result["cod_fee"].fillna(0) - result["expected_cod_fee"]
     result["amount_within_tolerance"] = (
-        result["credit_delta"].abs() <= AMOUNT_TOLERANCE
-        ) & (~result["payment_method"].eq("COD") | (result["cod_amount_delta"].abs() <= AMOUNT_TOLERANCE))
-    result["fee_within_tolerance"] = result["fee_delta"].abs() <= AMOUNT_TOLERANCE
-    result["cod_fee_within_tolerance"] = result["cod_fee_delta"].abs() <= AMOUNT_TOLERANCE
+        result["credit_delta"].abs() <= policy.amount_tolerance
+        ) & (~result["payment_method"].eq("COD") | (result["cod_amount_delta"].abs() <= policy.amount_tolerance))
+    result["fee_within_tolerance"] = result["fee_delta"].abs() <= policy.amount_tolerance
+    result["cod_fee_within_tolerance"] = result["cod_fee_delta"].abs() <= policy.amount_tolerance
     result["candidate_key_exact"] = result["bank_found"] & result["shipment_found"] & result["tracking_exact"]
     result["reason_codes"] = result.apply(_reason_codes, axis=1)
     return result

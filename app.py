@@ -8,13 +8,15 @@ from recon.engine import Policy, artifact_bundle, attach_truth, build_features, 
 
 ROOT = Path(__file__).parent
 DATA = ROOT / "data" / "generated"
+MANIFEST = DATA / "manifest.json"
 
 st.set_page_config(page_title="SmartRecon", page_icon="🔎", layout="wide")
 
 
 @st.cache_data
 def run_demo(feeds: dict[str, pd.DataFrame], truth: pd.DataFrame | None) -> pd.DataFrame:
-    results = reconcile(build_features(feeds), Policy())
+    policy = Policy(mdr_bps=0, cod_fee_bps=0, amount_tolerance=0.01)
+    results = reconcile(build_features(feeds, policy), policy)
     return attach_truth(results, truth) if truth is not None else results
 
 
@@ -22,7 +24,7 @@ st.sidebar.title("SmartRecon")
 st.sidebar.caption("Precision-first reconciliation intelligence")
 page = st.sidebar.radio(
     "Walkthrough",
-    ["Executive Overview", "Data & Contract", "Match Explorer", "Exceptions / Triage", "Model Diagnostics", "Brazil Olist Explorer"],
+    ["Executive Overview", "Data & Contract", "Match Explorer", "Exceptions / Triage", "Model Diagnostics", "Olist Source Explorer"],
 )
 
 st.sidebar.caption("Bundled fixtures are the default; upload all three feeds to try a custom run.")
@@ -59,8 +61,8 @@ if page == "Executive Overview":
     st.bar_chart(results["reason_codes"].value_counts().head(8))
 elif page == "Data & Contract":
     st.title("Data & Contract")
-    st.write("The primary demo is a deterministic September 2026 VND contract with 100,000 scenario units.")
-    st.json({"currency": "VND", "amount_tolerance": 1000, "MDR": "180 bps", "COD fee": "80 bps", "cutoff window": "3 days", "policy": ">=99.5% confidence to auto-accept"})
+    st.write("The primary demo is a seeded BRL benchmark derived from real Olist orders, items, payments, and delivery events.")
+    st.json({"currency": "BRL", "source": "brazil ecom", "amount_tolerance": 0.01, "payment fee assumption": "0 bps: Olist payment values are already settled totals", "policy": ">=99.5% confidence to auto-accept"})
     st.dataframe(results[["order_id", "payment_method", "order_amount", "reason_codes"]].head(100), use_container_width=True)
 elif page == "Match Explorer":
     st.title("Match Explorer")
@@ -82,9 +84,10 @@ elif page == "Model Diagnostics":
     st.write("Reason codes are the local explanation; the confidence score is calibrated conservatively around the business acceptance threshold.")
     st.json(m)
 else:
-    st.title("Brazil Olist Explorer")
+    st.title("Olist Source Explorer")
     path = ROOT / "brazil ecom" / "olist_orders_dataset.csv"
     orders = pd.read_csv(path)
-    st.write("A separate Brazilian marketplace dataset used to demonstrate exploratory data quality—not mixed into the VND reconciliation contract.")
+    st.write("The real Brazilian marketplace records that anchor the derived BRL reconciliation benchmark.")
     st.metric("Orders", f"{len(orders):,}")
+    st.write("The benchmark uses delivered/shipped orders with item and payment totals that tie out in the source data, then applies seeded controlled mutations for evaluation.")
     st.dataframe(orders.head(200), use_container_width=True)

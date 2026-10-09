@@ -11,14 +11,15 @@ DATA = ROOT / "data" / "generated"
 
 def test_engine_is_deterministic_and_high_precision():
     feeds = load_feeds(DATA)
-    first = reconcile(build_features(feeds), Policy())
-    second = reconcile(build_features(feeds), Policy())
+    policy = Policy(mdr_bps=0, cod_fee_bps=0, amount_tolerance=0.01)
+    first = reconcile(build_features(feeds, policy), policy)
+    second = reconcile(build_features(feeds, policy), policy)
     pd.testing.assert_frame_equal(first, second)
 
 
 def test_bundled_fixture_meets_precision_bar():
     results = attach_truth(
-        reconcile(build_features(load_feeds(DATA)), Policy()),
+        reconcile(build_features(load_feeds(DATA), Policy(mdr_bps=0, cod_fee_bps=0, amount_tolerance=0.01)), Policy(mdr_bps=0, cod_fee_bps=0, amount_tolerance=0.01)),
         pd.read_csv(DATA / "ground_truth.csv"),
     )
     summary = metrics(results)

@@ -5,9 +5,12 @@ OMS orders, payment-bank credits, and 3PL logistics events. It combines
 deterministic candidate generation with an interpretable discrepancy classifier,
 confidence-aware abstention, and an auditable triage queue.
 
-The primary demo uses the deterministic VND fixtures in `data/generated/`.
-The `brazil ecom/` Olist files are intentionally presented as a separate
-data-quality explorer because they describe a different business domain.
+The primary demo uses a seeded BRL reconciliation benchmark derived from the
+real Olist records in `brazil ecom/`. Olist supplies the order, item, payment,
+and delivery evidence; `recon.olistdata` derives bank and logistics feed
+exports from those records and records provenance in `data/generated/manifest.json`.
+The generated scenarios are controlled mutations of real rows, not an
+independent fictional business domain.
 
 ## Run locally
 
@@ -18,8 +21,14 @@ pip install -e ".[dev]"
 streamlit run app.py
 ```
 
+Regenerate the derived benchmark after changing the source data or generator:
+
+```powershell
+python -m recon.olistdata --source "brazil ecom" --out data/generated --rows 25000 --seed 42
+```
+
 The app has pages for the executive story, data contract, match explorer,
-exceptions/triage, model diagnostics, and the Brazil Olist explorer. Every
+exceptions/triage, model diagnostics, and the Olist source explorer. Every
 decision can be downloaded as CSV/JSON, including reason codes and feature
 contributions.
 
