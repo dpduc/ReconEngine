@@ -50,6 +50,8 @@ def load_feed(name: str, folder: str | Path, spec: FeedSpec, mapping: dict[str, 
               ingested_at: str | None = None) -> LoadedFeed:
     """Read one feed, rename `{canonical: source}` columns and attach lineage.
 
+    Values stay strings (empty -> NaN); ``parse_numeric`` converts numeric columns later.
+
     `source_row` is the 1-based data row (header excluded).
     """
     path = Path(folder) / spec.path
@@ -60,11 +62,17 @@ def load_feed(name: str, folder: str | Path, spec: FeedSpec, mapping: dict[str, 
     raw = reader(path, spec)
     frame = raw.rename(columns={source: canonical for canonical, source in mapping.items()})
     frame = frame.replace("", np.nan)
-    for column in NUMERIC_COLUMNS.get(name, ()):
-        if column in frame:
-            frame[column] = pd.to_numeric(frame[column], errors="coerce")
     frame[SOURCE_FILE] = spec.path
     frame[SOURCE_ROW] = np.arange(1, len(frame) + 1)
     frame[ROW_HASH] = _row_hashes(raw)
     frame[INGESTED_AT] = ingested_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
     return LoadedFeed(name, path, file_sha256(path), frame)
+
+
+def parse_numeric(name: str, frame: pd.DataFrame) -> pd.DataFrame:
+    """Parse the feed's numeric columns; unparseable values become NaN (the parse check reports them first)."""
+    frame = frame.copy()
+    for column in NUMERIC_COLUMNS.get(name, ()):
+        if column in frame:
+            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    return frame

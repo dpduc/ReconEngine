@@ -8,14 +8,15 @@ from pathlib import Path
 
 import pandas as pd
 
-from recon.checks import run_checks
+from recon.checks import run_checks, run_raw_checks
 from recon.config import RunConfig
 from recon.evaluation import attach_truth, metrics
 from recon.funnel import RULE_VERSION, STEPS, FunnelContext, build_units, run_funnel
 from recon.health import HealthReport
-from recon.ingest import LoadedFeed, file_sha256, load_feed
+from recon.ingest import LoadedFeed, file_sha256, load_feed, parse_numeric
 from recon.resolutions import apply_resolutions
-from recon.results import BLOCKED, COMPLETED, ReconRun
+from recon.results import BLOCKED, COMPLETED, EXCLUDED_COLUMNS, ReconRun
+from recon.schema import EXCLUDED_BY, EXCLUSION_REASON, ROW_HASH, SOURCE_FILE, SOURCE_ROW
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,23 @@ class _Prepared:
     inputs: dict[str, LoadedFeed]
     feeds: dict[str, pd.DataFrame]
     report: HealthReport
+    excluded: pd.DataFrame
+
+
+def _split_excluded(feeds: dict[str, pd.DataFrame]) -> tuple[dict[str, pd.DataFrame], pd.DataFrame]:
+    """Take rows that resolutions marked as excluded out of the feeds, keeping them as a report."""
+    kept, excluded = {}, []
+    for name, frame in feeds.items():
+        if EXCLUDED_BY not in frame:
+            kept[name] = frame
+            continue
+        mask = frame[EXCLUDED_BY].notna()
+        rows = frame.loc[mask, [SOURCE_FILE, SOURCE_ROW, ROW_HASH, EXCLUDED_BY, EXCLUSION_REASON]]
+        excluded.append(rows.rename(columns={EXCLUDED_BY: "issue_id", EXCLUSION_REASON: "reason"})
+                        .assign(feed=name))
+        kept[name] = frame.loc[~mask].drop(columns=[EXCLUDED_BY, EXCLUSION_REASON])
+    table = pd.concat(excluded, ignore_index=True) if excluded else pd.DataFrame()
+    return kept, table.reindex(columns=list(EXCLUDED_COLUMNS))
 
 
 def _prepare(sources: str | Path, config: RunConfig) -> _Prepared:
@@ -32,8 +50,11 @@ def _prepare(sources: str | Path, config: RunConfig) -> _Prepared:
         for name, spec in config.feeds.items()
     }
     feeds = apply_resolutions({name: loaded.frame for name, loaded in inputs.items()}, config)
-    report = HealthReport(issues=tuple(run_checks(feeds, config)))
-    return _Prepared(inputs, feeds, report)
+    feeds, excluded = _split_excluded(feeds)
+    raw_issues = run_raw_checks(feeds, config)
+    feeds = {name: parse_numeric(name, frame) for name, frame in feeds.items()}
+    report = HealthReport(issues=tuple(raw_issues + run_checks(feeds, config)))
+    return _Prepared(inputs, feeds, report, excluded)
 
 
 def inspect(sources: str | Path, config: RunConfig) -> HealthReport:
@@ -48,7 +69,7 @@ def run(sources: str | Path, config: RunConfig) -> ReconRun:
     """Re-inspect; refuse with a blocked run while the gate is closed, else run the funnel."""
     prepared = _prepare(sources, config)
     if not prepared.report.gate_open:
-        return ReconRun(status=BLOCKED, health=prepared.report)
+        return ReconRun(status=BLOCKED, health=prepared.report, excluded=prepared.excluded)
     ctx = FunnelContext(feeds=prepared.feeds, policy=config.policy)
     results, funnel_counts = run_funnel(build_units(prepared.feeds), STEPS, ctx)
     input_files = {name: {"path": config.feeds[name].path, "sha256": loaded.sha256}
@@ -63,6 +84,8 @@ def run(sources: str | Path, config: RunConfig) -> ReconRun:
         "input_files": input_files,
         "run_config": config.to_dict(),
         "metrics": metrics(results),
+        "excluded_rows": {k: int(v) for k, v in prepared.excluded["feed"].value_counts().items()},
     }
     return ReconRun(status=COMPLETED, health=prepared.report, results=results,
-                    funnel=funnel_counts, manifest=manifest, feeds=prepared.feeds)
+                    funnel=funnel_counts, manifest=manifest, feeds=prepared.feeds,
+                    excluded=prepared.excluded)

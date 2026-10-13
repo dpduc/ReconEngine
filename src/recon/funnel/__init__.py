@@ -12,10 +12,12 @@ from recon.funnel.base import (
 )
 from recon.funnel.decision import decision
 from recon.funnel.linking import link_exact
+from recon.funnel.routing import route_review
 from recon.funnel.rules import rule_checks
 
 STEPS: list[FunnelStep] = [
     FunnelStep("link_exact", link_exact),
+    FunnelStep("route_review", route_review),
     FunnelStep("rule_checks", rule_checks),
     FunnelStep("decision", decision),
 ]
