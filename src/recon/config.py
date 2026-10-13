@@ -18,6 +18,7 @@ class Policy:
     mdr_bps: int = 180
     cod_fee_bps: int = 80
     amount_tolerance: float = AMOUNT_TOLERANCE
+    link_date_window_days: int = 4  # linking pass 2: |value_date - order date| allowed
 
 
 @dataclass(frozen=True)

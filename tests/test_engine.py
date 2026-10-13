@@ -33,3 +33,9 @@ def test_bundled_fixture_meets_precision_bar(benchmark_run):
     summary = benchmark_run.manifest["metrics"]
     assert summary["auto_accept_precision"] >= 0.995
     assert summary["review_rate"] <= 0.01
+
+
+def test_benchmark_links_every_bank_record_in_pass_1(benchmark_run):
+    passes = benchmark_run.results["bank_link_pass"].value_counts()
+    assert passes.to_dict() == {"exact": len(benchmark_run.feeds["bank"])}
+    assert "REVIEW" not in set(benchmark_run.results["decision"])

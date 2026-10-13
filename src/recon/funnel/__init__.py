@@ -11,11 +11,13 @@ from recon.funnel.base import (
     split,
 )
 from recon.funnel.decision import decision
-from recon.funnel.linking import link_exact
+from recon.funnel.linking import link_candidates, link_constrained, link_exact
 from recon.funnel.rules import rule_checks
 
 STEPS: list[FunnelStep] = [
     FunnelStep("link_exact", link_exact),
+    FunnelStep("link_constrained", link_constrained),
+    FunnelStep("link_candidates", link_candidates),
     FunnelStep("rule_checks", rule_checks),
     FunnelStep("decision", decision),
 ]
