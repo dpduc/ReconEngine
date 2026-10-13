@@ -74,7 +74,10 @@ def _candidate_pairs(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     amount tolerance of the expected credit; `day_gap` is |value date - order date|.
     """
     bank = _bank_frame(ctx)
-    bank = bank[~bank["bank_source_row"].isin(units["bank_source_row"].dropna())]
+    # Rows already linked, or whose reference names a known order (possibly decided upstream), are not free.
+    claimed = bank["bank_source_row"].isin(units["bank_source_row"].dropna())
+    names_order = bank["order_ref"].isin(ctx.feeds["oms"]["order_id"].dropna())
+    bank = bank[~claimed & ~names_order]
     open_units = units[units["bank_link_pass"].isna()]
     both_currency = all("currency" in ctx.feeds[f].columns for f in ("oms", "bank"))
     oms_currency = "currency_oms" if both_currency else None

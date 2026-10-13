@@ -127,6 +127,21 @@ def test_two_equally_good_candidates_go_to_review_with_both_listed(tmp_path):
     assert "LINK_CANDIDATES" in unit["reason_codes"]
 
 
+def test_bank_record_naming_another_order_is_not_a_pass_2_candidate(tmp_path):
+    # Order 1 is canceled (decided before linking); its payment must not be borrowed by order 2.
+    config = write_sources(
+        tmp_path,
+        oms=("ORD2024-0000001,T1,PREPAID,42.50,2024-01-10T08:00:00,canceled\n"
+             "ORD2024-0000002,T2,PREPAID,42.50,2024-01-10T09:00:00,delivered\n"),
+        bank="P1,PAYMENT ORD2024-0000001,42.50,0,42.50,2024-01-11\n",
+        ship=SHIP_TWO,
+        oms_header=OMS_HEADER.strip() + ",order_status\n",
+    )
+    unit = results_by_order(tmp_path, config).loc["ORD2024-0000002"]
+    assert unit["bank_link_pass"] != "constrained"
+    assert unit["reason_codes"] == "MISSING_PAYMENT"
+
+
 def test_pass_3_candidates_never_auto_accept(tmp_path):
     # Even a policy that would accept anything leaves candidate-only units in REVIEW.
     lax = Policy(mdr_bps=0, cod_fee_bps=0, amount_tolerance=0.01, accept_threshold=0.0)

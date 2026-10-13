@@ -8,7 +8,7 @@ from __future__ import annotations
 import pandas as pd
 
 from recon.funnel.base import RULE_VERSION, decide, lineage_prefixed
-from recon.funnel.rules import EXCEPTION_CONFIDENCE
+from recon.funnel.reasons import EXCEPTION_CONFIDENCE
 from recon.schema import SOURCE_ROW
 
 REVERSE_PASS = "reverse_pass"

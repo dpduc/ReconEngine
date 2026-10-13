@@ -1,17 +1,32 @@
-"""Rule checks on linked units: deltas, tolerances and reason codes."""
+"""Rule checks on linked units, one funnel step per reason code, in the documented order.
+
+The first rule check measures deltas and tolerances; later checks reuse those columns.
+A unit is decided by the first check it fails.
+"""
 
 from __future__ import annotations
+
+from typing import Callable
 
 import pandas as pd
 
 from recon.contracts import fee
-from recon.funnel.base import FunnelContext, StepOutcome, decide, split
+from recon.funnel.base import FunnelContext, FunnelStep, StepOutcome, split
+from recon.funnel.reasons import exception
 
-EXCEPTION_CONFIDENCE = 0.15
+
+def _within(delta: pd.Series, tolerance: float) -> pd.Series:
+    """Absolute tolerance, inclusive; the epsilon absorbs float noise such as 20.01 - 20.00."""
+    return delta.abs() <= tolerance + 1e-9
 
 
-def _features(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
+def _measure(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
+    if "credit_delta" in units:
+        return units
     policy, out = ctx.policy, units.copy()
+    for column in ("requires_payment", "requires_shipment"):
+        if column not in out:
+            out[column] = True
     out["bank_found"] = out["txn_ref"].notna()
     out["shipment_found"] = out["tracking_code"].notna()
     out["tracking_exact"] = out["tracking_no"].fillna("").eq(out["tracking_code"].fillna(""))
@@ -28,37 +43,39 @@ def _features(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     out["expected_cod_fee"] = out["cod_collected"].fillna(0).map(lambda x: fee(int(x), policy.cod_fee_bps))
     out["fee_delta"] = out["fee_amount"].fillna(0) - out["expected_mdr"]
     out["cod_fee_delta"] = out["cod_fee"].fillna(0) - out["expected_cod_fee"]
-    out["amount_within_tolerance"] = (out["credit_delta"].abs() <= policy.amount_tolerance) & (
-        ~out["payment_method"].eq("COD") | (out["cod_amount_delta"].abs() <= policy.amount_tolerance)
+    out["amount_within_tolerance"] = (_within(out["credit_delta"], policy.amount_tolerance)) & (
+        ~out["payment_method"].eq("COD") | (_within(out["cod_amount_delta"], policy.amount_tolerance))
     )
-    out["fee_within_tolerance"] = out["fee_delta"].abs() <= policy.amount_tolerance
-    out["cod_fee_within_tolerance"] = out["cod_fee_delta"].abs() <= policy.amount_tolerance
+    out["fee_within_tolerance"] = _within(out["fee_delta"], policy.amount_tolerance)
+    out["cod_fee_within_tolerance"] = _within(out["cod_fee_delta"], policy.amount_tolerance)
+    out["timing_ok"] = True
+    if "picked_at" in out and "delivered_at" in out:
+        picked = pd.to_datetime(out["picked_at"], errors="coerce", format="ISO8601")
+        delivered = pd.to_datetime(out["delivered_at"], errors="coerce", format="ISO8601")
+        out["timing_ok"] = ~(picked > delivered)
     out["candidate_key_exact"] = out["bank_found"] & out["shipment_found"] & out["tracking_exact"]
-    out["clean"] = (
-        out["candidate_key_exact"] & out["amount_within_tolerance"]
-        & out["fee_within_tolerance"] & out["cod_fee_within_tolerance"]
-    )
-    out["reason_codes"] = [_reason_codes(row) for row in out.itertuples(index=False)]
+    # Every check below passed; a linked shipment must also agree on tracking number.
+    out["clean"] = ~out["shipment_found"] | out["tracking_exact"]
     return out
 
 
-def _reason_codes(row) -> str:
-    reasons: list[str] = []
-    if not row.bank_found:
-        reasons.append("MISSING_PAYMENT")
-    if not row.shipment_found:
-        reasons.append("MISSING_SHIPMENT")
-    if row.bank_found and not row.amount_within_tolerance:
-        reasons.append("AMOUNT_MISMATCH")
-    if row.bank_found and not row.fee_within_tolerance:
-        reasons.append("FEE_MISMATCH")
-    if row.shipment_found and not row.cod_fee_within_tolerance:
-        reasons.append("COD_FEE_MISMATCH")
-    return "|".join(reasons) or "THREE_WAY_TIE_OUT"
+def _rule(reason: str, fails: Callable[[pd.DataFrame], pd.Series]):
+    def check(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
+        units = _measure(units, ctx)
+        failed, remaining = split(units, fails(units).astype(bool))
+        return StepOutcome(decided=exception(failed, reason), remaining=remaining)
+
+    check.__doc__ = f"Units failing this check become EXCEPTION({reason})."
+    return check
 
 
-def rule_checks(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
-    """Units with a missing leg or a mismatch become exceptions; the rest pass on."""
-    units = _features(units, ctx)
-    failed, remaining = split(units, units["reason_codes"].str.contains("MISSING|MISMATCH"))
-    return StepOutcome(decided=decide(failed, "EXCEPTION", EXCEPTION_CONFIDENCE), remaining=remaining)
+RULE_STEPS: list[FunnelStep] = [
+    FunnelStep("missing_payment", _rule("MISSING_PAYMENT", lambda u: u["requires_payment"] & ~u["bank_found"])),
+    FunnelStep("amount_mismatch", _rule("AMOUNT_MISMATCH", lambda u: u["bank_found"] & ~u["amount_within_tolerance"])),
+    FunnelStep("missing_shipment", _rule("MISSING_SHIPMENT",
+                                         lambda u: u["requires_shipment"] & ~u["shipment_found"])),
+    FunnelStep("fee_mismatch", _rule("FEE_MISMATCH", lambda u: u["bank_found"] & ~u["fee_within_tolerance"])),
+    FunnelStep("cod_fee_mismatch", _rule("COD_FEE_MISMATCH",
+                                         lambda u: u["shipment_found"] & ~u["cod_fee_within_tolerance"])),
+    FunnelStep("timing_mismatch", _rule("TIMING_MISMATCH", lambda u: u["shipment_found"] & ~u["timing_ok"])),
+]

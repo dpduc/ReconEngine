@@ -15,6 +15,7 @@ from recon.funnel import RULE_VERSION, STEPS, FunnelContext, build_units, run_fu
 from recon.funnel.orphans import orphan_counts, reverse_pass
 from recon.health import HealthReport
 from recon.ingest import LoadedFeed, file_sha256, load_feed
+from recon.mapping import DraftConfig, MappingProfile, draft_config, load_profile, save_profile, suggest_mapping  # noqa: F401  (public API)
 from recon.resolutions import apply_resolutions
 from recon.results import BLOCKED, COMPLETED, ReconRun
 

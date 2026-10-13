@@ -29,13 +29,30 @@ def test_engine_is_deterministic(benchmark_run):
     pd.testing.assert_frame_equal(benchmark_run.funnel, again.funnel)
 
 
+def test_funnel_counts_match_the_notebook_funnel(benchmark_run):
+    # Section 4 of notebooks/eda_reconciliation_4_tables.ipynb.
+    decided = benchmark_run.funnel.set_index("step")["decided"]
+    assert decided["missing_source_evidence"] == 775
+    assert decided["status_policy"] == 1082
+    assert decided["missing_payment"] == 477
+    # The notebook's `delta.gt(0.01)` also flags 66 MATCHED units whose delta is exactly
+    # 0.01 BRL plus float noise; the engine treats the tolerance as inclusive.
+    assert decided["amount_mismatch"] == 1340 - 66
+    assert decided["missing_shipment"] == 471
+    assert decided["fee_mismatch"] == decided["cod_fee_mismatch"] == 0
+    # The notebook stops at "PASS"; timing runs after it: the 30 picked-after-delivered shipments.
+    assert decided["timing_mismatch"] == 30
+    assert decided["decision"] == 95296 + 66 - 30
+    assert decided.sum() == len(benchmark_run.results)
+
+
 def test_bundled_fixture_meets_precision_bar(benchmark_run):
     summary = benchmark_run.manifest["metrics"]
     assert summary["auto_accept_precision"] >= 0.995
     assert summary["review_rate"] <= 0.01
 
 
-def test_benchmark_links_every_bank_record_in_pass_1(benchmark_run):
-    passes = benchmark_run.results["bank_link_pass"].value_counts()
-    assert passes.to_dict() == {"exact": len(benchmark_run.feeds["bank"])}
-    assert "REVIEW" not in set(benchmark_run.results["decision"])
+def test_benchmark_links_only_through_pass_1(benchmark_run):
+    results = benchmark_run.results
+    assert set(results["bank_link_pass"].dropna()) == {"exact"}
+    assert not results["deciding_step"].isin(["link_constrained", "link_candidates"]).any()
