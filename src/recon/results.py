@@ -39,8 +39,7 @@ def exception_queue(results: pd.DataFrame, orphans: pd.DataFrame) -> pd.DataFram
         parts.append(results[results["decision"] == "EXCEPTION"].assign(record_type="oms"))
     if len(orphans):
         parts.append(orphans.assign(record_type=orphans["orphan_feed"]))
-    if not parts:
-        return pd.DataFrame(columns=["record_type", "record_ref", "amount_at_risk", "age_days"])
+    front = ["record_type", "record_ref", "amount_at_risk", "age_days", "decision", "reason_codes"]
     framed = []
     for part in parts:
         for record_type, group in part.groupby("record_type", sort=False):
@@ -50,12 +49,13 @@ def exception_queue(results: pd.DataFrame, orphans: pd.DataFrame) -> pd.DataFram
                 amount_at_risk=pd.to_numeric(group[amount], errors="coerce").fillna(0.0).abs(),
                 _event_at=_first_present(group, dates),
             ))
+    if not framed:  # nothing to queue: keep the columns so callers can still filter
+        return pd.DataFrame(columns=front + [c for c in results.columns if c not in front])
     queue = pd.concat(framed, ignore_index=True)
     as_of = queue["_event_at"].max()
     queue["age_days"] = (as_of - queue["_event_at"]).dt.days
     queue = queue.sort_values(["amount_at_risk", "age_days"], ascending=[False, False],
                               na_position="last", kind="stable").drop(columns="_event_at")
-    front = ["record_type", "record_ref", "amount_at_risk", "age_days", "decision", "reason_codes"]
     return queue[front + [c for c in queue.columns if c not in front]].reset_index(drop=True)
 
 

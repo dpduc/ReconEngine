@@ -47,6 +47,20 @@ ORD2024-0000003,AMOUNT_ERROR,UNDERPAID,EXCEPTION,AMOUNT_MISMATCH
 """
 
 
+def test_exception_queue_is_empty_but_filterable_when_every_unit_is_accepted(tmp_path):
+    from test_linking import OMS_TWO, SHIP_TWO
+    from test_linking import write_sources as write_linking_sources
+
+    bank = ("P1,PAYMENT ORD2024-0000001,100.00,0,100.00,2024-01-02\n"
+            "P2,PAYMENT ORD2024-0000002,42.50,0,42.50,2024-01-11\n")
+    outcome = run(tmp_path, write_linking_sources(tmp_path, oms=OMS_TWO, bank=bank, ship=SHIP_TWO))
+    assert (outcome.results["decision"] == "AUTO_ACCEPT").all()
+
+    queue = outcome.exception_queue
+    assert queue.empty
+    assert {"record_type", "record_ref", "reason_codes", "deciding_step"} <= set(queue.columns)
+
+
 def test_precision_and_recall_per_reason_code_against_truth(tmp_path):
     # Predicted: order 2 AMOUNT_MISMATCH (right), order 3 MISSING_PAYMENT (truth says AMOUNT_MISMATCH).
     (tmp_path / "truth.csv").write_text(TRUTH, encoding="utf-8")
