@@ -44,6 +44,7 @@ class FeedSpec:
     format: str = "csv"
     encoding: str = "utf-8"
     date_format: str | None = None
+    delimiter: str | None = None  # CSV only; None = detect from the header line
 
 
 @dataclass(frozen=True)
