@@ -10,9 +10,9 @@ from typing import Any, Callable
 
 import pandas as pd
 
-from recon.checks.integrity import parse_dates
+from recon.ingest import parse_dates
 from recon.config import RunConfig
-from recon.schema import NUMERIC_COLUMNS
+from recon.schema import NUMERIC_COLUMNS, ORDER_STATUS
 
 Profile = Callable[[dict[str, pd.DataFrame], RunConfig], Any]
 
@@ -50,9 +50,9 @@ def amount_distribution(feeds: dict[str, pd.DataFrame], config: RunConfig) -> di
 @profile("order_status_mix")
 def order_status_mix(feeds: dict[str, pd.DataFrame], config: RunConfig) -> dict[str, int] | None:
     oms = feeds.get("oms")
-    if oms is None or "order_status" not in oms.columns:
+    if oms is None or ORDER_STATUS not in oms.columns:
         return None
-    counts = oms["order_status"].fillna("<missing>").value_counts()
+    counts = oms[ORDER_STATUS].fillna("<missing>").value_counts()
     return {str(status): int(n) for status, n in counts.items()}
 
 
@@ -62,8 +62,7 @@ def value_date_lag_days(feeds: dict[str, pd.DataFrame], config: RunConfig) -> di
     bank = feeds.get("bank")
     if bank is None or not {"txn_date", "value_date"} <= set(bank.columns):
         return None
-    spec = config.feeds.get("bank")
-    date_format = spec and spec.date_format
+    date_format = config.date_format("bank")
     txn = parse_dates(bank["txn_date"], date_format).dt.normalize()
     value = parse_dates(bank["value_date"], date_format).dt.normalize()
     return _percentiles((value - txn).dt.days)

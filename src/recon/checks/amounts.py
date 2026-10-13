@@ -7,12 +7,12 @@ import pandas as pd
 from recon.checks import register, warning
 from recon.config import RunConfig
 from recon.health import Issue
-from recon.schema import NUMERIC_COLUMNS
+from recon.schema import AMOUNT_COLUMNS, NUMERIC_COLUMNS
 
 # Amounts that should never be zero on a real order or payment (fees and COD may be).
-NONZERO_COLUMNS = {"oms": ("order_amount",), "bank": ("credit_amount",)}
+NONZERO_COLUMNS = {feed: (AMOUNT_COLUMNS[feed],) for feed in ("oms", "bank")}
 # Headline amounts screened for outliers.
-OUTLIER_COLUMNS = {"oms": ("order_amount",), "bank": ("credit_amount",), "logistics": ("cod_collected",)}
+OUTLIER_COLUMNS = {feed: (column,) for feed, column in AMOUNT_COLUMNS.items()}
 OUTLIER_IQR_MULTIPLIER = 3.0
 
 

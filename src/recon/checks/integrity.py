@@ -4,18 +4,15 @@ from __future__ import annotations
 
 import pandas as pd
 
-from recon.checks import register, register_raw
+from recon.checks import register, register_raw, sample
 from recon.config import RunConfig
 from recon.health import DUPLICATE_STRATEGY, EXCLUDE_ROWS, SET_DATE_FORMAT, FixOption, Issue, Severity
+from recon.ingest import parse_dates
 from recon.schema import CURRENCY, DATE_COLUMNS, NUMERIC_COLUMNS, PRIMARY_KEYS, SOURCE_ROW, review_column
-
-SAMPLE_SIZE = 5
 
 
 def sample_rows(frame: pd.DataFrame, columns: list[str]) -> tuple[dict, ...]:
-    cols = [SOURCE_ROW] + [c for c in columns if c in frame.columns]
-    head = frame[cols].head(SAMPLE_SIZE).astype(object).where(frame[cols].head(SAMPLE_SIZE).notna(), None)
-    return tuple(head.to_dict("records"))
+    return sample(frame[[SOURCE_ROW] + [c for c in columns if c in frame.columns]])
 
 
 def exclude_option(feed: str, rows: pd.DataFrame, label: str) -> FixOption:
@@ -58,24 +55,15 @@ DATE_FORMAT_CANDIDATES = tuple(
 )
 
 
-def parse_dates(values: pd.Series, date_format: str | None = None) -> pd.Series:
-    """ISO 8601 always parses; `date_format` (strftime) is tried for the rest. Failures are NaT."""
-    parsed = pd.to_datetime(values, format="ISO8601", errors="coerce")
-    if date_format:
-        parsed = parsed.fillna(pd.to_datetime(values, format=date_format, errors="coerce"))
-    return parsed
-
-
 @register
 def unparseable_date(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Issue]:
     issues = []
     for feed, frame in feeds.items():
-        spec = config.feeds.get(feed)
         for column in DATE_COLUMNS.get(feed, ()):
             if column not in frame:
                 continue
             values = frame[column]
-            bad = frame[values.notna() & parse_dates(values, spec and spec.date_format).isna()]
+            bad = frame[values.notna() & parse_dates(values, config.date_format(feed)).isna()]
             if bad.empty:
                 continue
             candidates = [fmt for fmt in DATE_FORMAT_CANDIDATES
@@ -98,7 +86,7 @@ def mixed_currency(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Is
         counts = codes.value_counts()
         if len(counts) < 2:
             continue
-        others = lambda keep: frame[codes.notna() & codes.ne(keep)]
+        rows_not_in = {keep: frame[codes.notna() & codes.ne(keep)] for keep in counts.index}  # currency -> other rows
         issues.append(Issue(
             id=f"mixed_currency:{feed}",
             check="mixed_currency",
@@ -107,8 +95,8 @@ def mixed_currency(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Is
             affected_rows=int(counts.iloc[1:].sum()),
             message=f"{feed}: amounts in several currencies ({', '.join(f'{c}: {n}' for c, n in counts.items())});"
                     " currencies are not converted",
-            sample_rows=sample_rows(others(counts.index[0]), [CURRENCY]),
-            fix_options=tuple(exclude_option(feed, others(keep), f"Keep only {keep}, exclude the other rows")
+            sample_rows=sample_rows(rows_not_in[counts.index[0]], [CURRENCY]),
+            fix_options=tuple(exclude_option(feed, rows_not_in[keep], f"Keep only {keep}, exclude the other rows")
                               for keep in counts.index),
         ))
     return issues

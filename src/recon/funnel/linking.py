@@ -11,7 +11,8 @@ from typing import Any
 
 import pandas as pd
 
-from recon.funnel.base import FunnelContext, StepOutcome, decide, lineage_prefixed
+from recon.funnel.base import FunnelContext, StepOutcome, cod_remittance, decide, lineage_prefixed, pass_on
+from recon.schema import CURRENCY, ORDER_REF_COLUMNS, REVIEW
 
 ORDER_REF = re.compile(r"(ORD\d{4}-\d{7}|[0-9a-f]{32})", re.IGNORECASE)
 CANDIDATE_MAX_SCORE = 0.5  # pass 3 scores stay well below any accept threshold
@@ -25,8 +26,8 @@ def extract_order_ref(description: Any) -> str | None:
 
 def bank_order_refs(bank: pd.DataFrame) -> pd.Series:
     """The structured `order_ref` column when mapped, otherwise the reference extracted from the description."""
-    if "order_ref" in bank.columns:
-        return bank["order_ref"]
+    if ORDER_REF_COLUMNS["bank"] in bank.columns:
+        return bank[ORDER_REF_COLUMNS["bank"]]
     return bank["description"].map(extract_order_ref)
 
 
@@ -51,21 +52,22 @@ def attach_exact(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     """`units` enriched with the bank and logistics records naming them (one-to-one only)."""
     bank = _bank_frame(ctx)
     logistics = lineage_prefixed(ctx.feeds["logistics"], "logistics")
-    orders = ctx.feeds["oms"]["order_id"].dropna()
-    linked = _link_one_to_one(units, orders, bank, "order_id", "order_ref", ("_oms", "_bank"), "bank_link_pass")
-    return _link_one_to_one(linked, orders, logistics, "order_id", "client_order_code", ("", "_logistics"),
+    order_id, orders = ORDER_REF_COLUMNS["oms"], ctx.feeds["oms"][ORDER_REF_COLUMNS["oms"]].dropna()
+    linked = _link_one_to_one(units, orders, bank, order_id, ORDER_REF_COLUMNS["bank"], ("_oms", "_bank"),
+                              "bank_link_pass")
+    return _link_one_to_one(linked, orders, logistics, order_id, ORDER_REF_COLUMNS["logistics"], ("", "_logistics"),
                             "logistics_link_pass")
 
 
 def link_exact(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
     """Pass 1: exact order reference, one-to-one only."""
     linked = attach_exact(units, ctx)
-    return StepOutcome(decided=linked.iloc[0:0], remaining=linked)
+    return pass_on(linked)
 
 
 def _bank_frame(ctx: FunnelContext) -> pd.DataFrame:
     bank = lineage_prefixed(ctx.feeds["bank"], "bank")
-    bank["order_ref"] = bank_order_refs(bank)
+    bank[ORDER_REF_COLUMNS["bank"]] = bank_order_refs(bank)
     return bank
 
 
@@ -75,8 +77,8 @@ def _currency(frame: pd.DataFrame, column: str | None) -> pd.Series:
     return frame[column].fillna("").astype(str).str.strip().str.upper()
 
 
-def _day(values: pd.Series) -> pd.Series:
-    return pd.to_datetime(values, errors="coerce", format="mixed", utc=True).dt.normalize()
+def _day(ctx: FunnelContext, feed: str, values: pd.Series) -> pd.Series:
+    return ctx.dates(feed, values, utc=True).dt.normalize()
 
 
 def _candidate_pairs(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
@@ -88,20 +90,19 @@ def _candidate_pairs(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     bank = _bank_frame(ctx)
     # Rows already linked, or whose reference names a known order (possibly decided upstream), are not free.
     claimed = bank["bank_source_row"].isin(units["bank_source_row"].dropna())
-    names_order = bank["order_ref"].isin(ctx.feeds["oms"]["order_id"].dropna())
+    names_order = bank[ORDER_REF_COLUMNS["bank"]].isin(ctx.feeds["oms"][ORDER_REF_COLUMNS["oms"]].dropna())
     bank = bank[~claimed & ~names_order]
     open_units = units[units["bank_link_pass"].isna()]
-    both_currency = all("currency" in ctx.feeds[f].columns for f in ("oms", "bank"))
-    oms_currency = "currency_oms" if both_currency else None
+    both_currency = all(CURRENCY in ctx.feeds[f].columns for f in ("oms", "bank"))
+    oms_currency = f"{CURRENCY}_oms" if both_currency else None
     expected = open_units["order_amount"]
     if "cod_collected" in open_units.columns:
-        remittance = open_units["cod_collected"] - open_units["ship_fee"].fillna(0) - open_units["cod_fee"].fillna(0)
         cod = open_units["payment_method"].eq("COD") & open_units["cod_collected"].notna()
-        expected = expected.where(~cod, remittance)
+        expected = expected.where(~cod, cod_remittance(open_units))
     left = pd.DataFrame({"unit_id": open_units["unit_id"], "_currency": _currency(open_units, oms_currency),
-                         "_expected": expected, "_day": _day(open_units["ordered_at"])})
-    right = pd.DataFrame({"bank_pos": bank.index, "_currency": _currency(bank, "currency" if both_currency else None),
-                          "_credit": bank["credit_amount"], "_value_day": _day(bank["value_date"])})
+                         "_expected": expected, "_day": _day(ctx, "oms", open_units["ordered_at"])})
+    right = pd.DataFrame({"bank_pos": bank.index, "_currency": _currency(bank, CURRENCY if both_currency else None),
+                          "_credit": bank["credit_amount"], "_value_day": _day(ctx, "bank", bank["value_date"])})
     pairs = left.merge(right, on="_currency")
     pairs = pairs[(pairs["_credit"] - pairs["_expected"]).abs() <= ctx.policy.amount_tolerance]
     pairs = pairs.assign(day_gap=(pairs["_value_day"] - pairs["_day"]).dt.days.abs())
@@ -127,7 +128,7 @@ def link_constrained(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
     pairs = pairs[pairs["day_gap"] <= ctx.policy.link_date_window_days]
     unique = ~pairs["unit_id"].duplicated(keep=False) & ~pairs["bank_pos"].duplicated(keep=False)
     linked = _attach_bank(units, _bank_frame(ctx), pairs[unique], "constrained")
-    return StepOutcome(decided=linked.iloc[0:0], remaining=linked)
+    return pass_on(linked)
 
 
 def link_candidates(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
@@ -142,7 +143,7 @@ def link_candidates(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
     pairs = _candidate_pairs(units, ctx)
     pairs = pairs[pairs["day_gap"] <= 2 * window]
     if pairs.empty:
-        return StepOutcome(decided=units.iloc[0:0], remaining=units)
+        return pass_on(units)
     bank = _bank_frame(ctx)
     pairs = pairs.assign(txn_ref=bank.loc[pairs["bank_pos"], "txn_ref"].to_numpy(),
                          score=(CANDIDATE_MAX_SCORE * (1 - pairs["day_gap"] / (2 * window + 1))).round(4))
@@ -160,5 +161,5 @@ def link_candidates(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
     review[CANDIDATE_ROWS] = review["unit_id"].map(candidate_rows)
     reasons = review["logistics_link_pass"].isna().map({True: "LINK_CANDIDATES|MISSING_SHIPMENT",
                                                         False: "LINK_CANDIDATES"})
-    decided = decide(review, "REVIEW", review["unit_id"].map(confidence), reasons)
+    decided = decide(review, REVIEW, review["unit_id"].map(confidence), reasons)
     return StepOutcome(decided=decided, remaining=remaining)

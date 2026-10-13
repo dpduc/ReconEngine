@@ -11,7 +11,7 @@ from typing import Callable
 import pandas as pd
 
 from recon.contracts import fee
-from recon.funnel.base import FunnelContext, FunnelStep, StepOutcome, split
+from recon.funnel.base import FunnelContext, FunnelStep, StepOutcome, cod_remittance, split
 from recon.funnel.reasons import exception
 
 
@@ -32,10 +32,8 @@ def _measure(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     out["tracking_exact"] = out["tracking_no"].fillna("").eq(out["tracking_code"].fillna(""))
     out["amount_delta"] = out["credit_amount"].fillna(0) - out["order_amount"].fillna(0)
     out["cod_amount_delta"] = out["cod_collected"].fillna(0) - out["order_amount"].fillna(0)
-    out["expected_credit"] = out["order_amount"].fillna(0).where(
-        out["payment_method"].eq("PREPAID"),
-        out["cod_collected"].fillna(0) - out["ship_fee"].fillna(0) - out["cod_fee"].fillna(0),
-    )
+    out["expected_credit"] = out["order_amount"].fillna(0).where(out["payment_method"].eq("PREPAID"),
+                                                                 cod_remittance(out))
     out["credit_delta"] = out["credit_amount"].fillna(0) - out["expected_credit"]
     out["expected_mdr"] = out["credit_amount"].fillna(0).where(
         out["payment_method"].eq("PREPAID"), 0
@@ -50,12 +48,11 @@ def _measure(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     out["cod_fee_within_tolerance"] = _within(out["cod_fee_delta"], policy.amount_tolerance)
     out["timing_ok"] = True
     if "picked_at" in out and "delivered_at" in out:
-        picked = pd.to_datetime(out["picked_at"], errors="coerce", format="ISO8601")
-        delivered = pd.to_datetime(out["delivered_at"], errors="coerce", format="ISO8601")
+        picked = ctx.dates("logistics", out["picked_at"])
+        delivered = ctx.dates("logistics", out["delivered_at"])
         out["timing_ok"] = ~(picked > delivered)
-    out["candidate_key_exact"] = out["bank_found"] & out["shipment_found"] & out["tracking_exact"]
-    # Every check below passed; a linked shipment must also agree on tracking number.
-    out["clean"] = ~out["shipment_found"] | out["tracking_exact"]
+    # A unit reaching the decision passed every check; a linked shipment must also agree on tracking number.
+    out["tracking_consistent"] = ~out["shipment_found"] | out["tracking_exact"]
     return out
 
 

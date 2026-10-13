@@ -6,6 +6,8 @@ from typing import Any
 
 import pandas as pd
 
+from recon.schema import AUTO_ACCEPT, EXCEPTION, REVIEW
+
 
 def attach_truth(results: pd.DataFrame, truth: pd.DataFrame) -> pd.DataFrame:
     truth = truth.drop_duplicates("order_id").rename(
@@ -13,7 +15,7 @@ def attach_truth(results: pd.DataFrame, truth: pd.DataFrame) -> pd.DataFrame:
     )
     out = results.merge(truth[["order_id", "scenario", "sub_kind", "truth_outcome", "truth_exception"]], on="order_id", how="left")
     out["truth_decision"] = out["truth_outcome"].map(
-        lambda value: "AUTO_ACCEPT" if value in {"PASS_1", "PASS_2"} else "EXCEPTION"
+        lambda value: AUTO_ACCEPT if value in {"PASS_1", "PASS_2"} else EXCEPTION
     )
     out["is_correct"] = out["decision"].eq(out["truth_decision"])
     return out
@@ -45,8 +47,8 @@ def per_reason_code(results: pd.DataFrame) -> dict[str, dict[str, Any]]:
 
 
 def metrics(results: pd.DataFrame) -> dict[str, Any]:
-    accepted = results[results["decision"] == "AUTO_ACCEPT"]
-    reviewed = results[results["decision"] == "REVIEW"]
+    accepted = results[results["decision"] == AUTO_ACCEPT]
+    reviewed = results[results["decision"] == REVIEW]
     truth_available = results["truth_decision"].notna() if "truth_decision" in results else pd.Series(False, index=results.index)
     scored = results[truth_available]
     return {

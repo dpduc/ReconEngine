@@ -5,6 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 from recon.funnel.base import decide
+from recon.schema import EXCEPTION
 
 EXCEPTION_CONFIDENCE = 0.15
 
@@ -23,4 +24,4 @@ PRIORITY = {
 
 def exception(units: pd.DataFrame, reason: str) -> pd.DataFrame:
     """Decide `units` as EXCEPTION(reason, priority)."""
-    return decide(units, "EXCEPTION", EXCEPTION_CONFIDENCE, reason).assign(priority=PRIORITY[reason])
+    return decide(units, EXCEPTION, EXCEPTION_CONFIDENCE, reason).assign(priority=PRIORITY[reason])

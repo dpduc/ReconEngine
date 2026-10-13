@@ -6,19 +6,22 @@ import pandas as pd
 
 from recon.checks import register, warning
 from recon.config import RunConfig
-from recon.funnel.linking import extract_order_ref
+from recon.funnel.linking import bank_order_refs
 from recon.health import Issue
+from recon.schema import ORDER_REF_COLUMNS
 
 
 def _order_refs(feeds: dict[str, pd.DataFrame]) -> dict[str, pd.Series]:
-    """Order reference per row of each feed that carries one."""
+    """Order reference per row of each feed that carries one, as linking reads it."""
     refs = {}
-    if "order_id" in feeds.get("oms", {}):
-        refs["oms"] = feeds["oms"]["order_id"]
-    if "description" in feeds.get("bank", {}):
-        refs["bank"] = feeds["bank"]["description"].map(extract_order_ref)
-    if "client_order_code" in feeds.get("logistics", {}):
-        refs["logistics"] = feeds["logistics"]["client_order_code"]
+    for feed, column in ORDER_REF_COLUMNS.items():
+        frame = feeds.get(feed)
+        if frame is None:
+            continue
+        if feed == "bank" and ({column, "description"} & set(frame.columns)):
+            refs[feed] = bank_order_refs(frame)
+        elif column in frame.columns:
+            refs[feed] = frame[column]
     return refs
 
 

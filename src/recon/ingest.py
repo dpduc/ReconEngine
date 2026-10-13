@@ -121,6 +121,15 @@ def load_feed(name: str, folder: str | Path, spec: FeedSpec, mapping: dict[str, 
     return LoadedFeed(name, path, file_sha256(path), frame)
 
 
+def parse_dates(values: pd.Series, date_format: str | None = None, utc: bool = False) -> pd.Series:
+    """ISO 8601 always parses; `date_format` (strftime, e.g. ``config.date_format(feed)``) is tried
+    for the rest. Failures are NaT. `utc` converts aware values to UTC and reads naive ones as UTC."""
+    parsed = pd.to_datetime(values, format="ISO8601", errors="coerce", utc=utc)
+    if date_format:
+        parsed = parsed.fillna(pd.to_datetime(values, format=date_format, errors="coerce", utc=utc))
+    return parsed
+
+
 def parse_numeric(name: str, frame: pd.DataFrame) -> pd.DataFrame:
     """Parse the feed's numeric columns; unparseable values become NaN (the parse check reports them first)."""
     frame = frame.copy()

@@ -16,43 +16,40 @@ from recon.health import ACKNOWLEDGE, FixOption, Issue, Severity
 
 Check = Callable[[dict[str, pd.DataFrame], RunConfig], Iterable[Issue]]
 
+def _registry(checks: list[Check]) -> tuple[Callable[[Check], Check], Callable[..., list[Issue]]]:
+    """A (register decorator, run function) pair over `checks`."""
+    def register(check: Check) -> Check:
+        checks.append(check)
+        return check
+
+    def run(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Issue]:
+        return [issue for check in checks for issue in check(feeds, config)]
+
+    return register, run
+
+
 CHECKS: list[Check] = []
-
-
-def register(check: Check) -> Check:
-    CHECKS.append(check)
-    return check
-
-
-def run_checks(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Issue]:
-    return [issue for check in CHECKS for issue in check(feeds, config)]
-
+register, run_checks = _registry(CHECKS)
 
 # Checks that need the raw strings of numeric columns, i.e. run before numeric parsing.
 RAW_CHECKS: list[Check] = []
-
-
-def register_raw(check: Check) -> Check:
-    RAW_CHECKS.append(check)
-    return check
-
-
-def run_raw_checks(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Issue]:
-    return [issue for check in RAW_CHECKS for issue in check(feeds, config)]
-
+register_raw, run_raw_checks = _registry(RAW_CHECKS)
 
 SAMPLE_SIZE = 5
+
+
+def sample(frame: pd.DataFrame) -> tuple[dict, ...]:
+    """The first SAMPLE_SIZE rows of `frame` as JSON-able records (missing values -> None)."""
+    head = frame.head(SAMPLE_SIZE).astype(object)
+    return tuple(head.where(head.notna(), None).to_dict("records"))
 
 
 def warning(issue_id: str, check: str, feed: str, frame: pd.DataFrame, mask: pd.Series,
             message: str, fixes: tuple[FixOption, ...] = ()) -> Issue:
     """A warning on the rows of `frame` selected by `mask`; it must be fixed or acknowledged before `run`."""
-    sample = frame[mask].head(SAMPLE_SIZE).astype(object)
-    sample = sample.where(sample.notna(), None)
     return Issue(
         id=issue_id, check=check, severity=Severity.WARNING, feed=feed,
-        affected_rows=int(mask.sum()), message=message,
-        sample_rows=tuple(sample.to_dict("records")),
+        affected_rows=int(mask.sum()), message=message, sample_rows=sample(frame[mask]),
         fix_options=fixes + (FixOption(ACKNOWLEDGE, "Acknowledge with a note"),),
     )
 

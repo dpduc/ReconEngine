@@ -5,20 +5,18 @@ from __future__ import annotations
 import pandas as pd
 
 from recon.checks import register, warning
-from recon.checks.integrity import parse_dates
 from recon.config import RunConfig
 from recon.health import Issue
+from recon.ingest import parse_dates
+from recon.schema import ORDER_STATUS, TIMESTAMP_COLUMNS
 
-# Optional canonical timestamp columns (pass through when unmapped) and the status
-# column that splits each feed into segments.
-TIMESTAMP_COLUMNS = {"oms": ("ordered_at",), "bank": ("txn_date",), "logistics": ("picked_at", "delivered_at")}
-SEGMENT_COLUMNS = {"oms": "order_status", "logistics": "status"}
+# The status column that splits each feed into segments.
+SEGMENT_COLUMNS = {"oms": ORDER_STATUS, "logistics": "status"}
 MIN_SEGMENT_ROWS = 2  # a lone midnight value is not evidence of a placeholder
 
 
 def _timestamps(series: pd.Series, config: RunConfig, feed: str) -> pd.Series:
-    spec = config.feeds.get(feed)
-    return parse_dates(series, spec and spec.date_format)
+    return parse_dates(series, config.date_format(feed))
 
 
 @register

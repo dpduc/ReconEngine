@@ -9,24 +9,19 @@ from typing import Any
 import pandas as pd
 
 from recon.health import HealthReport, Issue
-from recon.schema import EXCEPTION, REVIEW
+from recon.ingest import parse_dates
+from recon.schema import AMOUNT_COLUMNS, DATE_COLUMNS, EXCEPTION, PRIMARY_KEYS, REVIEW
 
 COMPLETED, BLOCKED = "completed", "blocked"
 EXCLUDED_COLUMNS = ("feed", "source_file", "source_row", "row_hash", "issue_id", "reason")
 
-# Per record type: (reference column, amount-at-risk column, event-date columns in preference order).
-_QUEUE_FIELDS = {
-    "oms": ("order_id", "order_amount", ("ordered_at",)),
-    "bank": ("txn_ref", "credit_amount", ("value_date", "txn_date")),
-    "logistics": ("tracking_code", "cod_collected", ("picked_at", "delivered_at")),
-}
-
 
 def _first_present(frame: pd.DataFrame, columns: tuple[str, ...]) -> pd.Series:
+    """Per row, the first of `columns` (in order) holding a date."""
     out = pd.Series(pd.NaT, index=frame.index, dtype="datetime64[ns]")
     for column in columns:
         if column in frame:
-            out = out.fillna(pd.to_datetime(frame[column], errors="coerce", format="mixed"))
+            out = out.fillna(parse_dates(frame[column]))
     return out
 
 
@@ -45,11 +40,10 @@ def exception_queue(results: pd.DataFrame, orphans: pd.DataFrame) -> pd.DataFram
     framed = []
     for part in parts:
         for record_type, group in part.groupby("record_type", sort=False):
-            ref, amount, dates = _QUEUE_FIELDS[record_type]
             framed.append(group.assign(
-                record_ref=group[ref],
-                amount_at_risk=pd.to_numeric(group[amount], errors="coerce").fillna(0.0).abs(),
-                _event_at=_first_present(group, dates),
+                record_ref=group[PRIMARY_KEYS[record_type]],
+                amount_at_risk=pd.to_numeric(group[AMOUNT_COLUMNS[record_type]], errors="coerce").fillna(0.0).abs(),
+                _event_at=_first_present(group, DATE_COLUMNS[record_type]),
             ))
     if not framed:  # nothing to queue: keep the columns so callers can still filter
         return pd.DataFrame(columns=front + [c for c in results.columns if c not in front])

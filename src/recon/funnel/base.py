@@ -7,13 +7,14 @@ enriched with new columns). The runner records the deciding step and counts.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Callable
 
 import pandas as pd
 
 from recon.config import Policy
 from recon.funnel.explain import explain_all
+from recon.ingest import parse_dates
 from recon.schema import INGESTED_AT, LINEAGE_COLUMNS
 
 RULE_VERSION = "1.3.0"  # bump whenever funnel logic changes
@@ -24,13 +25,28 @@ HASH_COLUMNS = ("oms_row_hash", "bank_row_hash", "logistics_row_hash")
 @dataclass(frozen=True)
 class FunnelContext:
     feeds: dict[str, pd.DataFrame]  # canonical feeds after resolutions
-    policy: Policy
+    policy: Policy  # with the run config's resolutions applied
+    date_formats: dict[str, str | None] = field(default_factory=dict)  # feed -> declared strftime format
+
+    def dates(self, feed: str, values: pd.Series, utc: bool = False) -> pd.Series:
+        """`values` (a date column of `feed`) parsed as the feed declares."""
+        return parse_dates(values, self.date_formats.get(feed), utc=utc)
 
 
 @dataclass(frozen=True)
 class StepOutcome:
     decided: pd.DataFrame
     remaining: pd.DataFrame
+
+
+def pass_on(units: pd.DataFrame) -> StepOutcome:
+    """Decide nothing; hand every unit (possibly enriched) to the next step."""
+    return StepOutcome(decided=units.iloc[0:0], remaining=units)
+
+
+def cod_remittance(frame: pd.DataFrame) -> pd.Series:
+    """What the 3PL remits for a COD order: cash collected less shipping and COD fees (missing = 0)."""
+    return frame["cod_collected"].fillna(0) - frame["ship_fee"].fillna(0) - frame["cod_fee"].fillna(0)
 
 
 @dataclass(frozen=True)

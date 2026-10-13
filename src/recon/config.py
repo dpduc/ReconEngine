@@ -21,20 +21,18 @@ def _default_status_policy() -> dict[str, tuple[str, ...]]:
 @dataclass(frozen=True)
 class Policy:
     accept_threshold: float = 0.995
-    review_threshold: float = 0.80
-    max_review_rate: float = 0.01
     mdr_bps: int = 180
     cod_fee_bps: int = 80
     amount_tolerance: float = 0.01  # absolute, in the feed currency
     link_date_window_days: int = 4  # linking pass 2: |value_date - order date| allowed
-    # order status -> evidence it needs ("payment", "shipment"); unlisted statuses are pending policy
+    # order status -> the EVIDENCE it requires; unlisted statuses are pending policy
     status_policy: dict[str, tuple[str, ...]] = field(default_factory=_default_status_policy)
 
     def __post_init__(self) -> None:
-        unknown = {e for needs in self.status_policy.values() for e in needs} - set(EVIDENCE)
+        unknown = {e for required in self.status_policy.values() for e in required} - set(EVIDENCE)
         if unknown:
             raise ValueError(f"unknown evidence in status_policy: {sorted(unknown)}")
-        normalized = {str(status): tuple(needs) for status, needs in self.status_policy.items()}
+        normalized = {str(status): tuple(required) for status, required in self.status_policy.items()}
         object.__setattr__(self, "status_policy", normalized)
 
     def __hash__(self) -> int:

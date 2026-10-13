@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from recon.checks.integrity import parse_dates
+from recon.ingest import parse_dates
 from recon.config import Resolution, RunConfig
 from recon.health import DUPLICATE_STRATEGY, EXCLUDE_ROWS, SET_DATE_FORMAT
 from recon.resolutions import HANDLERS, Feeds
@@ -49,8 +49,7 @@ def _latest_order(frame: pd.DataFrame, feed: str, config: RunConfig) -> pd.Serie
     """Sort key: the feed's own date when present, then file order."""
     for column in DATE_COLUMNS.get(feed, ()):
         if column in frame:
-            spec = config.feeds.get(feed)
-            return parse_dates(frame[column], spec and spec.date_format)
+            return parse_dates(frame[column], config.date_format(feed))
     return frame[SOURCE_ROW]
 
 
@@ -85,7 +84,7 @@ def set_date_format(feeds: Feeds, resolution: Resolution, config: RunConfig) -> 
     frame = feeds[feed].copy()
     for column in DATE_COLUMNS.get(feed, ()):
         if column in frame:
-            parsed = pd.to_datetime(frame[column], format=date_format, errors="coerce")
+            parsed = parse_dates(frame[column], date_format)
             frame[column] = parsed.dt.strftime(iso).where(parsed.notna(), frame[column])
     return _with_frame(feeds, feed, frame)
 

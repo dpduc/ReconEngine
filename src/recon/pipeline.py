@@ -30,7 +30,15 @@ from recon.health import (
     Severity,
 )
 from recon.ingest import LoadedFeed, file_sha256, load_feed, parse_numeric
-from recon.mapping import DraftConfig, MappingProfile, Suggestion, draft_config, load_profile, save_profile, suggest_mapping
+from recon.mapping import (
+    DraftConfig,
+    MappingProfile,
+    Suggestion,
+    draft_config,
+    load_profile,
+    save_profile,
+    suggest_mapping,
+)
 from recon.profiles import run_profiles
 from recon.resolutions import apply_resolutions, resolve, undo
 from recon.results import BLOCKED, COMPLETED, EXCLUDED_COLUMNS, ReconRun
@@ -116,7 +124,8 @@ def run(sources: str | Path, config: RunConfig) -> ReconRun:
     prepared = _prepare(sources, config)
     if not prepared.report.gate_open:
         return ReconRun(status=BLOCKED, health=prepared.report, excluded=prepared.excluded)
-    ctx = FunnelContext(feeds=prepared.feeds, policy=config.resolved_policy)
+    ctx = FunnelContext(feeds=prepared.feeds, policy=config.resolved_policy,
+                        date_formats={feed: config.date_format(feed) for feed in config.feeds})
     results, funnel_counts = run_funnel(build_units(prepared.feeds), STEPS, ctx)
     orphans, reverse_counts = reverse_pass(results, prepared.feeds)
     funnel_counts = pd.concat([funnel_counts, pd.DataFrame([reverse_counts])], ignore_index=True)
