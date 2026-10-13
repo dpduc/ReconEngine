@@ -22,6 +22,7 @@ class Policy:
     mdr_bps: int = 180
     cod_fee_bps: int = 80
     amount_tolerance: float = 0.01  # absolute, in the feed currency
+    link_date_window_days: int = 4  # linking pass 2: |value_date - order date| allowed
     # order status -> evidence it needs ("payment", "shipment"); unlisted statuses are pending policy
     status_policy: dict[str, tuple[str, ...]] = field(default_factory=_default_status_policy)
 

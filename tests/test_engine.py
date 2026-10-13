@@ -50,3 +50,9 @@ def test_bundled_fixture_meets_precision_bar(benchmark_run):
     summary = benchmark_run.manifest["metrics"]
     assert summary["auto_accept_precision"] >= 0.995
     assert summary["review_rate"] <= 0.01
+
+
+def test_benchmark_links_only_through_pass_1(benchmark_run):
+    results = benchmark_run.results
+    assert set(results["bank_link_pass"].dropna()) == {"exact"}
+    assert not results["deciding_step"].isin(["link_constrained", "link_candidates"]).any()
