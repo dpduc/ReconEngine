@@ -1,23 +1,30 @@
+import json
+import tempfile
+from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
-from recon.engine import Policy, artifact_bundle, attach_truth, build_features, load_feeds, metrics, reconcile, validate_feed
+from recon.config import RunConfig, load_config
+from recon.evaluation import metrics
+from recon.pipeline import run
 
 
 ROOT = Path(__file__).parent
 DATA = ROOT / "data" / "generated"
-MANIFEST = DATA / "manifest.json"
+CONFIG = ROOT / "configs" / "olist_benchmark.json"
 
 st.set_page_config(page_title="SmartRecon", page_icon="🔎", layout="wide")
 
 
 @st.cache_data
-def run_demo(feeds: dict[str, pd.DataFrame], truth: pd.DataFrame | None) -> pd.DataFrame:
-    policy = Policy(mdr_bps=0, cod_fee_bps=0, amount_tolerance=0.01)
-    results = reconcile(build_features(feeds, policy), policy)
-    return attach_truth(results, truth) if truth is not None else results
+def run_demo(sources: str, config_json: str):
+    """Thin shell over the pipeline: refuse with the open issues if the gate is closed."""
+    outcome = run(sources, RunConfig.from_dict(json.loads(config_json)))
+    if outcome.blocked:
+        raise ValueError("; ".join(issue.message for issue in outcome.open_issues))
+    return outcome
 
 
 st.sidebar.title("SmartRecon")
@@ -34,18 +41,20 @@ uploads = {
     "logistics": st.sidebar.file_uploader("Logistics CSV", type="csv"),
 }
 try:
+    config = load_config(CONFIG)
     if all(uploads.values()):
-        feeds = {name: pd.read_csv(upload) for name, upload in uploads.items()}
-        errors = [error for name, frame in feeds.items() for error in validate_feed(frame, name)]
-        if errors:
-            raise ValueError("; ".join(errors))
-        results = run_demo(feeds, None)
+        # Uploads must use canonical column names until the mapping wizard lands.
+        folder = Path(tempfile.mkdtemp(prefix="recon-upload-"))
+        for name, upload in uploads.items():
+            (folder / config.feeds[name].path).write_bytes(upload.getvalue())
+        outcome = run_demo(str(folder), replace(config, ground_truth=None).to_json())
     else:
-        results = run_demo(load_feeds(DATA), pd.read_csv(DATA / "ground_truth.csv"))
+        outcome = run_demo(str(DATA), config.to_json())
 except (OSError, ValueError) as exc:
-    st.error(f"Unable to load the bundled demo: {exc}")
+    st.error(f"Unable to run reconciliation: {exc}")
     st.stop()
 
+results = outcome.results
 m = metrics(results)
 
 if page == "Executive Overview":
@@ -69,7 +78,7 @@ elif page == "Match Explorer":
     query = st.text_input("Search order ID or reason code")
     shown = results if not query else results[results.astype(str).apply(lambda col: col.str.contains(query, case=False, na=False)).any(axis=1)]
     st.dataframe(shown.head(500), use_container_width=True)
-    for name, content in artifact_bundle(shown).items():
+    for name, content in replace(outcome, results=shown).bundle().items():
         st.download_button(f"Download {name}", content, file_name=name)
 elif page == "Exceptions / Triage":
     st.title("Exceptions / Triage")

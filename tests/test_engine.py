@@ -1,32 +1,35 @@
+"""End-to-end regression on the Olist benchmark through the public pipeline."""
+
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
-from recon.engine import Policy, attach_truth, build_features, load_feeds, metrics, reconcile, validate_feed
+from recon.config import load_config
+from recon.pipeline import inspect, run
 
 
 ROOT = Path(__file__).parents[1]
 DATA = ROOT / "data" / "generated"
+CONFIG = ROOT / "configs" / "olist_benchmark.json"
 
 
-def test_engine_is_deterministic_and_high_precision():
-    feeds = load_feeds(DATA)
-    policy = Policy(mdr_bps=0, cod_fee_bps=0, amount_tolerance=0.01)
-    first = reconcile(build_features(feeds, policy), policy)
-    second = reconcile(build_features(feeds, policy), policy)
-    pd.testing.assert_frame_equal(first, second)
+@pytest.fixture(scope="module")
+def benchmark_run():
+    return run(DATA, load_config(CONFIG))
 
 
-def test_bundled_fixture_meets_precision_bar():
-    results = attach_truth(
-        reconcile(build_features(load_feeds(DATA), Policy(mdr_bps=0, cod_fee_bps=0, amount_tolerance=0.01)), Policy(mdr_bps=0, cod_fee_bps=0, amount_tolerance=0.01)),
-        pd.read_csv(DATA / "ground_truth.csv"),
-    )
-    summary = metrics(results)
+def test_benchmark_passes_the_gate():
+    assert inspect(DATA, load_config(CONFIG)).gate_open
+
+
+def test_engine_is_deterministic(benchmark_run):
+    again = run(DATA, load_config(CONFIG))
+    pd.testing.assert_frame_equal(benchmark_run.results, again.results)
+    pd.testing.assert_frame_equal(benchmark_run.funnel, again.funnel)
+
+
+def test_bundled_fixture_meets_precision_bar(benchmark_run):
+    summary = benchmark_run.manifest["metrics"]
     assert summary["auto_accept_precision"] >= 0.995
     assert summary["review_rate"] <= 0.01
-
-
-def test_schema_validation_reports_missing_columns():
-    errors = validate_feed(pd.DataFrame({"order_id": ["ORD-1"]}), "oms")
-    assert "missing required columns" in errors[0]
