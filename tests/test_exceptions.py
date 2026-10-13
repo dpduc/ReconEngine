@@ -139,3 +139,15 @@ def test_export_bundle_holds_every_artifact_and_reads_back(tmp_path):
     assert "decision" in read("triage_queue.csv").columns
     manifest = json.loads(bundle["manifest.json"])
     assert manifest["metrics"]["orphans"] == {"ORPHAN_PAYMENT": 1, "ORPHAN_SHIPMENT": 0}
+
+
+def test_each_decision_is_explained_in_plain_language_with_deltas_and_confidence(tmp_path):
+    bank = BANK + "P9,TRANSFER NO REFERENCE,42.00,0,42.00,2024-01-05\n"
+    outcome = run(tmp_path, acknowledged(tmp_path, write_sources(tmp_path, bank=bank)))
+    explained = outcome.results.set_index("order_id")["explanation"]
+
+    assert explained["ORD2024-0000001"].startswith("Order, bank credit and shipment tie out.")
+    assert explained["ORD2024-0000002"].startswith("The bank credit is 5.00 more than expected")
+    assert explained["ORD2024-0000003"].startswith("No bank credit found for this order.")
+    assert explained["ORD2024-0000003"].endswith("Confidence 0.15.")
+    assert outcome.orphans["explanation"].iloc[0].startswith("This bank credit matches no order.")

@@ -13,6 +13,7 @@ from typing import Callable
 import pandas as pd
 
 from recon.config import Policy
+from recon.funnel.explain import explain_all
 from recon.schema import INGESTED_AT, LINEAGE_COLUMNS
 
 RULE_VERSION = "1.3.0"  # bump whenever funnel logic changes
@@ -40,16 +41,13 @@ class FunnelStep:
 
 def decide(units: pd.DataFrame, decision: str, confidence: float | pd.Series,
            reason_codes: str | pd.Series | None = None) -> pd.DataFrame:
-    """Stamp a decision on `units`; reason codes are '|'-joined."""
+    """Stamp a decision on `units`; reason codes are '|'-joined and explained in plain language."""
     out = units.copy()
     if reason_codes is not None:
         out["reason_codes"] = reason_codes
     out["decision"] = decision
     out["confidence"] = confidence
-    out["explanation"] = [
-        f"{codes.replace('|', ', ')}; confidence={conf:.4f}"
-        for codes, conf in zip(out["reason_codes"], out["confidence"])
-    ]
+    out["explanation"] = explain_all(out)
     return out
 
 
