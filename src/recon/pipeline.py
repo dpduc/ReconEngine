@@ -14,6 +14,7 @@ from recon.evaluation import attach_truth, metrics
 from recon.funnel import RULE_VERSION, STEPS, FunnelContext, build_units, run_funnel
 from recon.health import HealthReport
 from recon.ingest import LoadedFeed, file_sha256, load_feed
+from recon.mapping import DraftConfig, MappingProfile, draft_config, load_profile, save_profile, suggest_mapping  # noqa: F401  (public API)
 from recon.resolutions import apply_resolutions
 from recon.results import BLOCKED, COMPLETED, ReconRun
 
