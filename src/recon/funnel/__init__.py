@@ -16,12 +16,14 @@ from recon.funnel.base import (
 from recon.funnel.decision import decision
 from recon.funnel.eligibility import missing_source_evidence, status_policy
 from recon.funnel.linking import link_exact
+from recon.funnel.routing import route_review
 from recon.funnel.rules import RULE_STEPS
 
 STEPS: list[FunnelStep] = [
     FunnelStep("missing_source_evidence", missing_source_evidence),
     FunnelStep("status_policy", status_policy),
     FunnelStep("link_exact", link_exact),
+    FunnelStep("route_review", route_review),
     *RULE_STEPS,
     FunnelStep("decision", decision),
 ]
