@@ -12,8 +12,10 @@ from recon.checks import run_checks, run_raw_checks
 from recon.config import RunConfig
 from recon.evaluation import attach_truth, metrics
 from recon.funnel import RULE_VERSION, STEPS, FunnelContext, build_units, run_funnel
+from recon.funnel.orphans import orphan_counts, reverse_pass
 from recon.health import HealthReport
 from recon.ingest import LoadedFeed, file_sha256, load_feed, parse_numeric
+from recon.mapping import DraftConfig, MappingProfile, draft_config, load_profile, save_profile, suggest_mapping  # noqa: F401  (public API)
 from recon.resolutions import apply_resolutions
 from recon.results import BLOCKED, COMPLETED, EXCLUDED_COLUMNS, ReconRun
 from recon.schema import EXCLUDED_BY, EXCLUSION_REASON, ROW_HASH, SOURCE_FILE, SOURCE_ROW
@@ -72,6 +74,7 @@ def run(sources: str | Path, config: RunConfig) -> ReconRun:
         return ReconRun(status=BLOCKED, health=prepared.report, excluded=prepared.excluded)
     ctx = FunnelContext(feeds=prepared.feeds, policy=config.policy)
     results, funnel_counts = run_funnel(build_units(prepared.feeds), STEPS, ctx)
+    orphans = reverse_pass(results, prepared.feeds)
     input_files = {name: {"path": config.feeds[name].path, "sha256": loaded.sha256}
                    for name, loaded in prepared.inputs.items()}
     if config.ground_truth:
@@ -83,9 +86,9 @@ def run(sources: str | Path, config: RunConfig) -> ReconRun:
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "input_files": input_files,
         "run_config": config.to_dict(),
-        "metrics": metrics(results),
+        "metrics": {**metrics(results), "orphans": orphan_counts(orphans)},
         "excluded_rows": {k: int(v) for k, v in prepared.excluded["feed"].value_counts().items()},
     }
     return ReconRun(status=COMPLETED, health=prepared.report, results=results,
-                    funnel=funnel_counts, manifest=manifest, feeds=prepared.feeds,
+                    funnel=funnel_counts, manifest=manifest, feeds=prepared.feeds, orphans=orphans,
                     excluded=prepared.excluded)
