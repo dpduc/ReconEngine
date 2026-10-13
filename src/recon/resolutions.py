@@ -25,3 +25,6 @@ def apply_resolutions(feeds: Feeds, config: RunConfig) -> Feeds:
         if handler is not None:
             feeds = handler(feeds, resolution, config)
     return feeds
+
+
+from recon import integrity_fixes  # noqa: E402,F401  (registers handlers)

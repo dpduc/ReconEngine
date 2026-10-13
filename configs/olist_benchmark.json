@@ -18,7 +18,10 @@
       "cod_collected": "cod_collected", "ship_fee": "ship_fee", "cod_fee": "cod_fee"
     }
   },
-  "policy": {"mdr_bps": 0, "cod_fee_bps": 0, "amount_tolerance": 0.01},
+  "policy": {
+    "mdr_bps": 0, "cod_fee_bps": 0, "amount_tolerance": 0.01,
+    "status_policy": {"delivered": ["payment", "shipment"], "shipped": ["payment", "shipment"]}
+  },
   "resolutions": [],
   "ground_truth": "ground_truth.csv"
 }
