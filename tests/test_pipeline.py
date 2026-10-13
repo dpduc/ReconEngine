@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
+from recon.acknowledgement import acknowledge_warnings
 from recon.config import FeedSpec, Policy, Resolution, RunConfig
 from recon.pipeline import inspect, run
 
@@ -54,6 +55,11 @@ def write_sources(folder: Path, oms: str = OMS, bank: str = BANK, ship: str = SH
         policy=POLICY,
         resolutions=FIXTURE_ACKNOWLEDGEMENTS,
     )
+
+
+def acknowledged(folder: Path, config: RunConfig) -> RunConfig:
+    """`config` with every warning acknowledged, for fixtures that are dirty on purpose."""
+    return acknowledge_warnings(config, inspect(folder, config), note="Deliberate gap in this test fixture")
 
 
 def test_clean_sources_have_no_blocking_issues(tmp_path):

@@ -18,7 +18,10 @@
       "cod_collected": "cod_collected", "ship_fee": "ship_fee", "cod_fee": "cod_fee"
     }
   },
-  "policy": {"mdr_bps": 0, "cod_fee_bps": 0, "amount_tolerance": 0.01},
+  "policy": {
+    "mdr_bps": 0, "cod_fee_bps": 0, "amount_tolerance": 0.01,
+    "status_policy": {"delivered": ["payment", "shipment"], "shipped": ["payment", "shipment"]}
+  },
   "resolutions": [
     {"issue_id": "missing_amount:oms:order_amount", "option": "acknowledge", "params": {},
      "note": "Olist orders with no items (mostly unavailable/canceled); the funnel routes them to REVIEW as MISSING_SOURCE_EVIDENCE."},
@@ -35,7 +38,7 @@
     {"issue_id": "coverage:oms:no_shipment", "option": "acknowledge", "params": {},
      "note": "Benchmark scenario MISSING_SHIPMENT plus undelivered/canceled orders that never shipped."},
     {"issue_id": "picked_after_delivered:logistics", "option": "acknowledge", "params": {},
-     "note": "Olist source has carrier dates after customer delivery dates; event order is not used for matching."},
+     "note": "Olist source has carrier dates after customer delivery dates; the funnel's timing check routes them to review."},
     {"issue_id": "placeholder_timestamp:logistics:delivered_at:status=SHIPPED", "option": "acknowledge", "params": {},
      "note": "Shipped-not-delivered rows carry the estimated delivery date at 00:00:00, not a real delivery event."}
   ],

@@ -7,7 +7,11 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
-from recon.contracts import AMOUNT_TOLERANCE
+EVIDENCE = ("payment", "shipment")
+
+
+def _default_status_policy() -> dict[str, tuple[str, ...]]:
+    return {"delivered": EVIDENCE, "shipped": EVIDENCE}
 
 
 @dataclass(frozen=True)
@@ -17,7 +21,19 @@ class Policy:
     max_review_rate: float = 0.01
     mdr_bps: int = 180
     cod_fee_bps: int = 80
-    amount_tolerance: float = AMOUNT_TOLERANCE
+    amount_tolerance: float = 0.01  # absolute, in the feed currency
+    # order status -> evidence it needs ("payment", "shipment"); unlisted statuses are pending policy
+    status_policy: dict[str, tuple[str, ...]] = field(default_factory=_default_status_policy)
+
+    def __post_init__(self) -> None:
+        unknown = {e for needs in self.status_policy.values() for e in needs} - set(EVIDENCE)
+        if unknown:
+            raise ValueError(f"unknown evidence in status_policy: {sorted(unknown)}")
+        normalized = {str(status): tuple(needs) for status, needs in self.status_policy.items()}
+        object.__setattr__(self, "status_policy", normalized)
+
+    def __hash__(self) -> int:
+        return hash(tuple((f, repr(getattr(self, f))) for f in self.__dataclass_fields__))
 
 
 @dataclass(frozen=True)
@@ -28,6 +44,7 @@ class FeedSpec:
     format: str = "csv"
     encoding: str = "utf-8"
     date_format: str | None = None
+    delimiter: str | None = None  # CSV only; None = detect from the header line
 
 
 @dataclass(frozen=True)
