@@ -1,25 +1,20 @@
 """SmartRecon entry point: wizard navigation over ``recon.pipeline``.
 
 Pages live in ``app_pages/`` and share state through ``recon_app.state``. Wizard steps
-run in order; Load -> Health -> Fix slot into ``WIZARD`` ahead of Run.
+run in order: Load -> Health -> Fix -> Run -> Review.
 """
-
-import hashlib
-import tempfile
-from dataclasses import replace
-from pathlib import Path
 
 import streamlit as st
 
-from recon.acknowledgement import acknowledge_warnings
-from recon.config import load_config
-from recon.pipeline import inspect
 from recon_app import state
 
 st.set_page_config(page_title="SmartRecon", page_icon=":material/search:", layout="wide")
 state.init()
 
 WIZARD = [
+    st.Page("app_pages/load.py", title="Load", icon=":material/upload_file:"),
+    st.Page("app_pages/health.py", title="Health", icon=":material/health_and_safety:"),
+    st.Page("app_pages/fix.py", title="Fix", icon=":material/build:"),
     st.Page("app_pages/run.py", title="Run", icon=":material/play_arrow:"),
     st.Page("app_pages/review.py", title="Review", icon=":material/fact_check:"),
 ]
@@ -33,32 +28,5 @@ page = st.navigation({"Wizard": WIZARD, "Benchmark": BENCHMARK})
 
 st.sidebar.title("SmartRecon")
 st.sidebar.caption("Precision-first reconciliation intelligence")
-# Until the Load step lands: canonical-column CSV uploads replace the bundled benchmark.
-st.sidebar.caption("Bundled fixtures are the default; upload all three feeds to try a custom run.")
-uploads = {
-    "oms": st.sidebar.file_uploader("OMS CSV", type="csv"),
-    "bank": st.sidebar.file_uploader("Bank CSV", type="csv"),
-    "logistics": st.sidebar.file_uploader("Logistics CSV", type="csv"),
-}
-# Until the Health/Fix step lands: warnings on uploads keep the gate closed unless acknowledged here.
-acknowledge_uploads = st.sidebar.checkbox(
-    "Acknowledge data warnings for uploads",
-    help="Warnings (missing amounts, coverage gaps, placeholder timestamps...) block Run until acknowledged.",
-)
-benchmark = load_config(state.BENCHMARK_CONFIG)
-if all(uploads.values()):
-    digest = hashlib.sha256(b"".join(upload.getvalue() for upload in uploads.values())).hexdigest()[:16]
-    folder = Path(tempfile.gettempdir()) / f"recon-upload-{digest}"
-    folder.mkdir(exist_ok=True)
-    for name, upload in uploads.items():
-        (folder / benchmark.feeds[name].path).write_bytes(upload.getvalue())
-    upload_config = replace(benchmark, ground_truth=None)
-    if acknowledge_uploads:
-        upload_config = acknowledge_warnings(upload_config, inspect(folder, upload_config),
-                                             note="Acknowledged for an uploaded demo run in the SmartRecon app")
-    state.set_inputs(str(folder), upload_config)
-    st.session_state["sidebar_uploads"] = True
-elif st.session_state.pop("sidebar_uploads", False):
-    state.set_inputs(state.BENCHMARK_SOURCES, benchmark)
 
 page.run()

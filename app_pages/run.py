@@ -12,7 +12,9 @@ health = st.session_state[state.HEALTH]
 gate_closed = health is not None and not health.gate_open
 if gate_closed:
     st.error(f"Health gate closed: {len(health.open_issues)} open issue(s). Resolve them before running.")
-if st.button("Run reconciliation", type="primary", icon=":material/play_arrow:", disabled=gate_closed):
+    st.page_link("app_pages/fix.py", label="Fix issues", icon=":material/build:")
+if st.button("Run reconciliation", type="primary", icon=":material/play_arrow:", disabled=gate_closed,
+             key="run"):
     state.start_run()
 
 outcome = state.current_run()

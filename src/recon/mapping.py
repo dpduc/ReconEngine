@@ -80,6 +80,7 @@ class Suggestion:
 class DraftConfig:
     config: RunConfig  # mapping holds only unflagged suggestions
     suggestions: dict[str, dict[str, Suggestion]]  # feed -> canonical -> suggestion
+    columns: dict[str, tuple[str, ...]] = field(default_factory=dict)  # feed -> source columns, file order
 
     @property
     def flagged(self) -> list[Suggestion]:
@@ -202,10 +203,11 @@ def draft_config(sources: str | Path, files: dict[str, str],
     otherwise the mapping is suggested. Policy and ground truth come from `base`.
     """
     folder = Path(sources)
-    feeds, mapping, suggestions = {}, {}, {}
+    feeds, mapping, suggestions, columns = {}, {}, {}, {}
     for feed, path in files.items():
         spec = feeds[feed] = _feed_spec(folder, path)
         raw = READERS[spec.format](folder / path, spec)
+        columns[feed] = tuple(raw.columns)
         profile = next((p for p in profiles if p.feed == feed and p.matches(list(raw.columns))), None)
         if profile is not None:
             suggestions[feed] = {
@@ -218,4 +220,4 @@ def draft_config(sources: str | Path, files: dict[str, str],
     base = base or RunConfig(feeds={})
     config = RunConfig(feeds=feeds, mapping=mapping, policy=base.policy,
                        resolutions=base.resolutions, ground_truth=base.ground_truth)
-    return DraftConfig(config, suggestions)
+    return DraftConfig(config, suggestions, columns)

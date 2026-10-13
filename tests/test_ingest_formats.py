@@ -97,6 +97,8 @@ def test_draft_config_suggests_the_mapping_for_renamed_columns(tmp_path):
     draft = draft_config(tmp_path, RENAMED_FILES)
 
     assert draft.flagged == []
+    assert draft.columns["bank"] == ("Bank Ref", "Txn Dt", "Value Dt", "Narrative", "Ccy",
+                                     "Credit", "Charges", "Net Settled")
     assert draft.config.mapping == {
         "oms": {"order_id": "Order Ref", "tracking_no": "AWB", "payment_method": "Pay Method",
                 "order_amount": "Total (BRL)", "ordered_at": "Order Date"},
