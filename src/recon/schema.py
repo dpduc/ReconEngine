@@ -35,6 +35,11 @@ DATE_COLUMNS: dict[str, tuple[str, ...]] = {
 }
 
 
+# Unit decisions. Every unit ends with exactly one; the work queue holds the last two.
+AUTO_ACCEPT, REVIEW, EXCEPTION = "AUTO_ACCEPT", "REVIEW", "EXCEPTION"
+DECISIONS = (AUTO_ACCEPT, REVIEW, EXCEPTION)
+
+
 def review_column(feed: str) -> str:
     """Column a resolution sets on a feed's rows to route their units to REVIEW (value = reason code)."""
     return f"{feed}_review_reason"

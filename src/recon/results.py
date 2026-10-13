@@ -9,6 +9,7 @@ from typing import Any
 import pandas as pd
 
 from recon.health import HealthReport, Issue
+from recon.schema import EXCEPTION, REVIEW
 
 COMPLETED, BLOCKED = "completed", "blocked"
 EXCLUDED_COLUMNS = ("feed", "source_file", "source_row", "row_hash", "issue_id", "reason")
@@ -30,13 +31,14 @@ def _first_present(frame: pd.DataFrame, columns: tuple[str, ...]) -> pd.Series:
 
 
 def exception_queue(results: pd.DataFrame, orphans: pd.DataFrame) -> pd.DataFrame:
-    """Unit exceptions plus orphans, ranked by amount at risk (desc) then age (oldest first).
+    """The work queue: EXCEPTION and REVIEW units plus orphans, ranked by amount at risk (desc)
+    then age (oldest first). `decision` tells exceptions from units awaiting review.
 
     Age is measured in days back from the latest event date in the queue, so runs are reproducible.
     """
     parts = []
     if "decision" in results:
-        parts.append(results[results["decision"] == "EXCEPTION"].assign(record_type="oms"))
+        parts.append(results[results["decision"].isin([EXCEPTION, REVIEW])].assign(record_type="oms"))
     if len(orphans):
         parts.append(orphans.assign(record_type=orphans["orphan_feed"]))
     front = ["record_type", "record_ref", "amount_at_risk", "age_days", "decision", "reason_codes"]
@@ -87,7 +89,7 @@ class ReconRun:
         """Downloadable artifacts keyed by file name."""
         return {
             "decisions.csv": self.results.to_csv(index=False),
-            "triage_queue.csv": self.results[self.results["decision"] == "REVIEW"].to_csv(index=False),
+            "triage_queue.csv": self.results[self.results["decision"] == REVIEW].to_csv(index=False),
             "exception_queue.csv": self.exception_queue.to_csv(index=False),
             "orphans.csv": self.orphans.to_csv(index=False),
             "funnel.csv": self.funnel.to_csv(index=False),

@@ -1,4 +1,4 @@
-"""Review: browse the ranked exception queue and orphans, trace any record to its source rows."""
+"""Review: browse the ranked exception queue (exceptions, review units, orphans), trace any record."""
 
 import pandas as pd
 import streamlit as st
@@ -10,16 +10,18 @@ from recon_app.trace import AMOUNT_COLUMNS, DELTA_COLUMNS, source_rows
 st.title("Review")
 outcome = state.require_run()
 
+QUEUE = "Exception queue"
 VIEWS = {
-    "Exception queue": lambda: outcome.exception_queue,
+    QUEUE: lambda: outcome.exception_queue,  # EXCEPTION and REVIEW units plus orphans
+    "Needs review": lambda: outcome.exception_queue.query("decision == 'REVIEW'").reset_index(drop=True),
     "Orphans": lambda: outcome.exception_queue.query("record_type != 'oms'").reset_index(drop=True),
     "All units": lambda: outcome.results.assign(record_type="oms", record_ref=outcome.results["order_id"]),
 }
 with st.container(horizontal=True, vertical_alignment="bottom"):
-    view = st.segmented_control("Records", list(VIEWS), default="Exception queue", key="review_view")
+    view = st.segmented_control("Records", list(VIEWS), default=QUEUE, key="review_view")
     st.download_button("Download bundle", lambda: state.bundle_zip(outcome), file_name="recon_bundle.zip",
                        mime="application/zip", icon=":material/download:", on_click="ignore")
-records = VIEWS[view or "Exception queue"]()
+records = VIEWS[view or QUEUE]()
 
 
 def codes(value) -> list[str]:
@@ -27,11 +29,15 @@ def codes(value) -> list[str]:
 
 
 with st.container(horizontal=True):
+    decision_filter = st.multiselect("Decision", sorted(records["decision"].dropna().unique()),
+                                     key="review_decisions")
     code_filter = st.multiselect("Reason code", sorted({c for v in records["reason_codes"] for c in codes(v)}),
                                  key="review_codes")
     step_filter = st.multiselect("Deciding step", sorted(records["deciding_step"].dropna().unique()),
                                  key="review_steps")
     query = st.text_input("Search reference", key="review_query")
+if decision_filter:
+    records = records[records["decision"].isin(decision_filter)]
 if code_filter:
     records = records[records["reason_codes"].map(lambda v: bool(set(codes(v)) & set(code_filter)))]
 if step_filter:

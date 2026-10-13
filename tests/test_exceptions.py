@@ -73,6 +73,23 @@ def test_exception_queue_ranks_by_amount_at_risk_then_age(tmp_path):
     assert (queue["decision"] == "EXCEPTION").all()
 
 
+def test_exception_queue_includes_review_units_with_their_decision(tmp_path):
+    from test_linking import OMS_TWO, SHIP_TWO
+    from test_linking import write_sources as write_linking_sources
+
+    # Order 2 (42.50) has two equally good candidates: REVIEW. P9 (60.00) is an orphan.
+    bank = ("P1,PAYMENT ORD2024-0000001,100.00,0,100.00,2024-01-02\n"
+            "P2,TRANSFER RECEIVED,42.50,0,42.50,2024-01-11\n"
+            "P3,TRANSFER RECEIVED,42.50,0,42.50,2024-01-11\n"
+            "P9,TRANSFER NO REFERENCE,60.00,0,60.00,2024-01-30\n")
+    config = write_linking_sources(tmp_path, oms=OMS_TWO, bank=bank, ship=SHIP_TWO)
+    queue = run(tmp_path, acknowledged(tmp_path, config)).exception_queue
+
+    assert list(queue["record_ref"]) == ["P9", "ORD2024-0000002"]
+    assert list(queue["decision"]) == ["EXCEPTION", "REVIEW"]
+    assert list(queue["amount_at_risk"]) == [60.0, 42.5]
+
+
 TRUTH = """order_id,scenario,sub_kind,expected_outcome,expected_exception
 ORD2024-0000001,MATCHED,MATCHED,PASS_1,
 ORD2024-0000002,AMOUNT_ERROR,OVERPAID,EXCEPTION,AMOUNT_MISMATCH
