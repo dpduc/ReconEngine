@@ -6,9 +6,10 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+from recon.acknowledgement import acknowledge_warnings
 from recon.config import RunConfig, load_config
 from recon.evaluation import metrics
-from recon.pipeline import run
+from recon.pipeline import inspect, run
 
 
 ROOT = Path(__file__).parent
@@ -40,6 +41,10 @@ uploads = {
     "bank": st.sidebar.file_uploader("Bank CSV", type="csv"),
     "logistics": st.sidebar.file_uploader("Logistics CSV", type="csv"),
 }
+acknowledge_uploads = st.sidebar.checkbox(
+    "Acknowledge data warnings for uploads",
+    help="Warnings (missing amounts, coverage gaps, placeholder timestamps...) keep the gate closed until acknowledged.",
+)
 try:
     config = load_config(CONFIG)
     if all(uploads.values()):
@@ -47,7 +52,11 @@ try:
         folder = Path(tempfile.mkdtemp(prefix="recon-upload-"))
         for name, upload in uploads.items():
             (folder / config.feeds[name].path).write_bytes(upload.getvalue())
-        outcome = run_demo(str(folder), replace(config, ground_truth=None).to_json())
+        upload_config = replace(config, ground_truth=None)
+        if acknowledge_uploads:
+            upload_config = acknowledge_warnings(upload_config, inspect(folder, upload_config),
+                                                 note="Acknowledged for an uploaded demo run in the SmartRecon app")
+        outcome = run_demo(str(folder), upload_config.to_json())
     else:
         outcome = run_demo(str(DATA), config.to_json())
 except (OSError, ValueError) as exc:
@@ -56,6 +65,8 @@ except (OSError, ValueError) as exc:
 
 results = outcome.results
 m = metrics(results)
+st.sidebar.download_button("Health Report (HTML)", outcome.health.to_html(), "health_report.html", "text/html")
+st.sidebar.download_button("Health Report (JSON)", outcome.health.to_json(), "health_report.json", "application/json")
 
 if page == "Executive Overview":
     st.title("SmartRecon")

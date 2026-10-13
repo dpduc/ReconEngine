@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pandas as pd
 
-from recon.config import FeedSpec, Policy, RunConfig
+from recon.config import FeedSpec, Policy, Resolution, RunConfig
 from recon.pipeline import inspect, run
 
 
@@ -34,6 +34,10 @@ MAPPING = {
                   "cod_collected": "COD", "ship_fee": "ShipFee", "cod_fee": "CODFee"},
 }
 POLICY = Policy(mdr_bps=0, cod_fee_bps=0, amount_tolerance=0.01)
+# ORD2024-0000003 is unpaid on purpose; acknowledge that warning so the gate opens.
+FIXTURE_ACKNOWLEDGEMENTS = (
+    Resolution("coverage:oms:no_payment", "acknowledge", note="ORD2024-0000003 is the MISSING_PAYMENT case"),
+)
 
 
 def write_sources(folder: Path, oms: str = OMS, bank: str = BANK, ship: str = SHIP) -> RunConfig:
@@ -48,6 +52,7 @@ def write_sources(folder: Path, oms: str = OMS, bank: str = BANK, ship: str = SH
         },
         mapping=MAPPING,
         policy=POLICY,
+        resolutions=FIXTURE_ACKNOWLEDGEMENTS,
     )
 
 

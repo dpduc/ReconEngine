@@ -19,6 +19,25 @@
     }
   },
   "policy": {"mdr_bps": 0, "cod_fee_bps": 0, "amount_tolerance": 0.01},
-  "resolutions": [],
+  "resolutions": [
+    {"issue_id": "missing_amount:oms:order_amount", "option": "acknowledge", "params": {},
+     "note": "Olist orders with no items (mostly unavailable/canceled); the funnel routes them to REVIEW as MISSING_SOURCE_EVIDENCE."},
+    {"issue_id": "missing_amount:logistics:ship_fee", "option": "acknowledge", "params": {},
+     "note": "One shipment without a freight total in the Olist items table; all orders are prepaid, so ship_fee does not enter the COD remittance check."},
+    {"issue_id": "zero_amount:bank:credit_amount", "option": "acknowledge", "params": {},
+     "note": "Three Olist payments recorded with payment_value = 0; kept so the matcher can flag the amount gap."},
+    {"issue_id": "amount_outlier:oms:order_amount", "option": "acknowledge", "params": {},
+     "note": "Long right tail of genuine Olist basket values, not entry errors."},
+    {"issue_id": "amount_outlier:bank:credit_amount", "option": "acknowledge", "params": {},
+     "note": "Payments mirror the order-value tail."},
+    {"issue_id": "coverage:oms:no_payment", "option": "acknowledge", "params": {},
+     "note": "Benchmark scenarios MISSING_PAYMENT plus orders without payment rows in Olist."},
+    {"issue_id": "coverage:oms:no_shipment", "option": "acknowledge", "params": {},
+     "note": "Benchmark scenario MISSING_SHIPMENT plus undelivered/canceled orders that never shipped."},
+    {"issue_id": "picked_after_delivered:logistics", "option": "acknowledge", "params": {},
+     "note": "Olist source has carrier dates after customer delivery dates; event order is not used for matching."},
+    {"issue_id": "placeholder_timestamp:logistics:delivered_at:status=SHIPPED", "option": "acknowledge", "params": {},
+     "note": "Shipped-not-delivered rows carry the estimated delivery date at 00:00:00, not a real delivery event."}
+  ],
   "ground_truth": "ground_truth.csv"
 }

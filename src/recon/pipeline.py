@@ -12,7 +12,9 @@ from recon.checks import run_checks
 from recon.config import RunConfig
 from recon.evaluation import attach_truth, metrics
 from recon.funnel import RULE_VERSION, STEPS, FunnelContext, build_units, run_funnel
+from recon.acknowledgement import acknowledgements
 from recon.health import HealthReport
+from recon.profiles import run_profiles
 from recon.ingest import LoadedFeed, file_sha256, load_feed
 from recon.resolutions import apply_resolutions
 from recon.results import BLOCKED, COMPLETED, ReconRun
@@ -32,7 +34,8 @@ def _prepare(sources: str | Path, config: RunConfig) -> _Prepared:
         for name, spec in config.feeds.items()
     }
     feeds = apply_resolutions({name: loaded.frame for name, loaded in inputs.items()}, config)
-    report = HealthReport(issues=tuple(run_checks(feeds, config)))
+    report = HealthReport(issues=tuple(run_checks(feeds, config)), profiles=run_profiles(feeds, config),
+                          acknowledged=acknowledgements(config))
     return _Prepared(inputs, feeds, report)
 
 

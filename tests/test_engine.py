@@ -23,6 +23,18 @@ def test_benchmark_passes_the_gate():
     assert inspect(DATA, load_config(CONFIG)).gate_open
 
 
+def test_benchmark_report_surfaces_known_findings():
+    report = inspect(DATA, load_config(CONFIG))
+    rows = {issue.id: issue.affected_rows for issue in report.issues}
+    assert rows["missing_amount:oms:order_amount"] == 775
+    assert rows["zero_amount:bank:credit_amount"] == 3
+    assert rows["picked_after_delivered:logistics"] == 30
+    assert rows["placeholder_timestamp:logistics:delivered_at:status=SHIPPED"] == 1100
+    assert report.profiles["value_date_lag_days"]["p99"] == 4
+    # Every finding is acknowledged in the benchmark config, so the gate is open.
+    assert all(report.is_acknowledged(issue) for issue in report.issues)
+
+
 def test_engine_is_deterministic(benchmark_run):
     again = run(DATA, load_config(CONFIG))
     pd.testing.assert_frame_equal(benchmark_run.results, again.results)
