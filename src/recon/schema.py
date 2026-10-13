@@ -20,3 +20,21 @@ PRIMARY_KEYS = {"oms": "order_id", "bank": "txn_ref", "logistics": "tracking_cod
 # Lineage carried by every loaded row.
 SOURCE_FILE, SOURCE_ROW, ROW_HASH, INGESTED_AT = "source_file", "source_row", "row_hash", "ingested_at"
 LINEAGE_COLUMNS = (SOURCE_FILE, SOURCE_ROW, ROW_HASH, INGESTED_AT)
+
+# Optional canonical currency column (any feed); one currency per feed is required.
+CURRENCY = "currency"
+
+# Set by resolutions on rows taken out of the run; the pipeline reports and removes them.
+EXCLUDED_BY, EXCLUSION_REASON = "excluded_by", "exclusion_reason"
+
+# Canonical (or common pass-through) date columns, first = the record's own date ("latest" order).
+DATE_COLUMNS: dict[str, tuple[str, ...]] = {
+    "oms": ("ordered_at",),
+    "bank": ("value_date", "txn_date"),
+    "logistics": ("delivered_at", "picked_at"),
+}
+
+
+def review_column(feed: str) -> str:
+    """Column a resolution sets on a feed's rows to route their units to REVIEW (value = reason code)."""
+    return f"{feed}_review_reason"

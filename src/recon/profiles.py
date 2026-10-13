@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 import pandas as pd
 
+from recon.checks.integrity import parse_dates
 from recon.config import RunConfig
 from recon.schema import NUMERIC_COLUMNS
 
@@ -61,8 +62,10 @@ def value_date_lag_days(feeds: dict[str, pd.DataFrame], config: RunConfig) -> di
     bank = feeds.get("bank")
     if bank is None or not {"txn_date", "value_date"} <= set(bank.columns):
         return None
-    txn = pd.to_datetime(bank["txn_date"], errors="coerce", format="ISO8601").dt.normalize()
-    value = pd.to_datetime(bank["value_date"], errors="coerce", format="ISO8601").dt.normalize()
+    spec = config.feeds.get("bank")
+    date_format = spec and spec.date_format
+    txn = parse_dates(bank["txn_date"], date_format).dt.normalize()
+    value = parse_dates(bank["value_date"], date_format).dt.normalize()
     return _percentiles((value - txn).dt.days)
 
 

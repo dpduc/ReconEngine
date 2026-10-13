@@ -11,6 +11,7 @@ import pandas as pd
 from recon.health import HealthReport, Issue
 
 COMPLETED, BLOCKED = "completed", "blocked"
+EXCLUDED_COLUMNS = ("feed", "source_file", "source_row", "row_hash", "issue_id", "reason")
 
 # Per record type: (reference column, amount-at-risk column, event-date columns in preference order).
 _QUEUE_FIELDS = {
@@ -67,6 +68,8 @@ class ReconRun:
     manifest: dict[str, Any] = field(default_factory=dict)
     feeds: dict[str, pd.DataFrame] = field(default_factory=dict)  # canonical feeds the run used
     orphans: pd.DataFrame = field(default_factory=pd.DataFrame)  # unlinked bank/logistics records
+    # rows a resolution took out of the run, with issue id and reason (EXCLUDED_COLUMNS)
+    excluded: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(columns=list(EXCLUDED_COLUMNS)))
 
     @property
     def blocked(self) -> bool:
@@ -88,5 +91,6 @@ class ReconRun:
             "exception_queue.csv": self.exception_queue.to_csv(index=False),
             "orphans.csv": self.orphans.to_csv(index=False),
             "funnel.csv": self.funnel.to_csv(index=False),
+            "excluded.csv": self.excluded.to_csv(index=False),
             "manifest.json": json.dumps(self.manifest, indent=2, default=str),
         }

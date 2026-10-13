@@ -28,6 +28,19 @@ def run_checks(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Issue]
     return [issue for check in CHECKS for issue in check(feeds, config)]
 
 
+# Checks that need the raw strings of numeric columns, i.e. run before numeric parsing.
+RAW_CHECKS: list[Check] = []
+
+
+def register_raw(check: Check) -> Check:
+    RAW_CHECKS.append(check)
+    return check
+
+
+def run_raw_checks(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Issue]:
+    return [issue for check in RAW_CHECKS for issue in check(feeds, config)]
+
+
 SAMPLE_SIZE = 5
 
 
@@ -45,4 +58,5 @@ def warning(issue_id: str, check: str, feed: str, frame: pd.DataFrame, mask: pd.
 
 
 from recon.checks import columns  # noqa: E402,F401  (registers checks)
+from recon.checks import integrity  # noqa: E402,F401
 from recon.checks import amounts, coverage, events  # noqa: E402,F401  (warning checks)

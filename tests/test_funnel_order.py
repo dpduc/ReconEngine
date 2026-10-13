@@ -122,11 +122,13 @@ def test_funnel_counts_follow_step_order_and_add_up(tmp_path):
     )
     funnel = outcome.funnel.set_index("step")
     assert list(funnel.index) == [
-        "missing_source_evidence", "status_policy", "link_exact", "missing_payment", "amount_mismatch",
-        "missing_shipment", "fee_mismatch", "cod_fee_mismatch", "timing_mismatch", "decision",
+        "missing_source_evidence", "status_policy", "link_exact", "link_constrained", "link_candidates",
+        "route_review", "missing_payment", "amount_mismatch", "missing_shipment", "fee_mismatch",
+        "cod_fee_mismatch", "timing_mismatch", "decision",
     ]
     assert funnel["decided"].to_dict() == {
-        "missing_source_evidence": 1, "status_policy": 1, "link_exact": 0, "missing_payment": 1,
+        "missing_source_evidence": 1, "status_policy": 1, "link_exact": 0, "link_constrained": 0,
+        "link_candidates": 0, "route_review": 0, "missing_payment": 1,
         "amount_mismatch": 0, "missing_shipment": 0, "fee_mismatch": 0, "cod_fee_mismatch": 0,
         "timing_mismatch": 0, "decision": 1,
     }

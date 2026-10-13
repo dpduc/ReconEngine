@@ -28,8 +28,8 @@ def test_unlinked_bank_and_logistics_records_become_orphans(tmp_path):
 
 def test_exception_queue_ranks_by_amount_at_risk_then_age(tmp_path):
     # Unit 2: amount mismatch on a 50.00 order; unit 3: missing payment on 70.00 (ordered 01-03).
-    # P9: 70.00 orphan payment valued 01-05 ties with unit 3 but is younger. T9: orphan, 12.00 COD.
-    bank = BANK + "P9,TRANSFER NO REFERENCE,70.00,0,70.00,2024-01-05\n"
+    # P9: 70.00 orphan payment valued 01-20 (outside any linking date window) ties with unit 3 but is younger. T9: orphan, 12.00 COD.
+    bank = BANK + "P9,TRANSFER NO REFERENCE,70.00,0,70.00,2024-01-20\n"
     ship = SHIP + "T9,ORD2024-0009999,12.0,6.0,0\n"
     outcome = run(tmp_path, acknowledged(tmp_path, write_sources(tmp_path, bank=bank, ship=ship)))
 
@@ -61,12 +61,12 @@ def test_precision_and_recall_per_reason_code_against_truth(tmp_path):
 
 
 def test_export_bundle_holds_every_artifact_and_reads_back(tmp_path):
-    bank = BANK + "P9,TRANSFER NO REFERENCE,70.00,0,70.00,2024-01-05\n"
+    bank = BANK + "P9,TRANSFER NO REFERENCE,70.00,0,70.00,2024-01-20\n"
     outcome = run(tmp_path, acknowledged(tmp_path, write_sources(tmp_path, bank=bank)))
     bundle = outcome.bundle()
 
     assert set(bundle) == {"decisions.csv", "triage_queue.csv", "exception_queue.csv",
-                           "orphans.csv", "funnel.csv", "manifest.json"}
+                           "orphans.csv", "funnel.csv", "excluded.csv", "manifest.json"}
     read = lambda name: pd.read_csv(io.StringIO(bundle[name]))
     assert len(read("decisions.csv")) == 3
     assert list(read("orphans.csv")["txn_ref"]) == ["P9"]

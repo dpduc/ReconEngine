@@ -5,6 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 from recon.checks import register, warning
+from recon.checks.integrity import parse_dates
 from recon.config import RunConfig
 from recon.health import Issue
 
@@ -15,8 +16,9 @@ SEGMENT_COLUMNS = {"oms": "order_status", "logistics": "status"}
 MIN_SEGMENT_ROWS = 2  # a lone midnight value is not evidence of a placeholder
 
 
-def _timestamps(series: pd.Series) -> pd.Series:
-    return pd.to_datetime(series, errors="coerce", format="ISO8601")
+def _timestamps(series: pd.Series, config: RunConfig, feed: str) -> pd.Series:
+    spec = config.feeds.get(feed)
+    return parse_dates(series, spec and spec.date_format)
 
 
 @register
@@ -24,7 +26,7 @@ def picked_after_delivered(feeds: dict[str, pd.DataFrame], config: RunConfig) ->
     frame = feeds.get("logistics")
     if frame is None or not {"picked_at", "delivered_at"} <= set(frame.columns):
         return []
-    mask = _timestamps(frame["picked_at"]) > _timestamps(frame["delivered_at"])
+    mask = _timestamps(frame["picked_at"], config, "logistics") > _timestamps(frame["delivered_at"], config, "logistics")
     if not mask.any():
         return []
     return [warning("picked_after_delivered:logistics", "picked_after_delivered", "logistics", frame, mask,
@@ -44,7 +46,7 @@ def placeholder_timestamp(feeds: dict[str, pd.DataFrame], config: RunConfig) -> 
         for column in TIMESTAMP_COLUMNS.get(feed, ()):
             if column not in frame.columns:
                 continue
-            stamps = _timestamps(frame[column])
+            stamps = _timestamps(frame[column], config, feed)
             if _all_midnight(stamps):
                 issues.append(warning(f"placeholder_timestamp:{feed}:{column}", "placeholder_timestamp", feed,
                                       frame, stamps.notna(),
