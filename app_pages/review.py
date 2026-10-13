@@ -3,9 +3,9 @@
 import pandas as pd
 import streamlit as st
 
-from recon.schema import FEEDS
+from recon.pipeline import AMOUNT_COLUMNS, FEEDS
 from recon_app import state
-from recon_app.trace import AMOUNT_COLUMNS, DELTA_COLUMNS, source_rows
+from recon_app.trace import DELTA_COLUMNS, source_rows
 
 st.title("Review")
 outcome = state.require_run()

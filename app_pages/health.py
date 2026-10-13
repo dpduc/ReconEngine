@@ -3,7 +3,7 @@
 import pandas as pd
 import streamlit as st
 
-from recon.health import Severity
+from recon.pipeline import Severity
 from recon_app import state
 
 ICONS = {Severity.BLOCKING: ":material/block:", Severity.WARNING: ":material/warning:",

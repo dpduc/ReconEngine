@@ -127,3 +127,19 @@ def test_same_sources_and_config_give_identical_runs(tmp_path):
     pd.testing.assert_frame_equal(first.funnel, second.funnel)
     strip = lambda m: {k: v for k, v in m.items() if k != "created_at"}
     assert strip(first.manifest) == strip(second.manifest)
+
+
+def test_remap_resolution_maps_a_source_column_and_undo_removes_it(tmp_path):
+    from recon.pipeline import resolve, undo
+
+    config = write_sources(tmp_path, oms=OMS.replace("Amount", "Total"))
+    [issue] = inspect(tmp_path, config).blocking_issues
+    [remap] = issue.fix_options
+    assert "Total" in remap.params["candidates"]
+
+    resolved = resolve(config, issue.id, remap.id, {**remap.params, "source": "Total"})
+    assert inspect(tmp_path, resolved).gate_open
+    outcome = run(tmp_path, resolved)
+    assert outcome.results.set_index("order_id").loc["ORD2024-0000001", "decision"] == "AUTO_ACCEPT"
+
+    assert undo(resolved, len(resolved.resolutions) - 1) == config

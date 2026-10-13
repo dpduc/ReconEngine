@@ -9,6 +9,7 @@ import pandas as pd
 
 from recon.checks.integrity import parse_dates
 from recon.config import Resolution, RunConfig
+from recon.health import DUPLICATE_STRATEGY, EXCLUDE_ROWS, SET_DATE_FORMAT
 from recon.resolutions import HANDLERS, Feeds
 from recon.schema import (
     DATE_COLUMNS,
@@ -90,7 +91,7 @@ def set_date_format(feeds: Feeds, resolution: Resolution, config: RunConfig) -> 
 
 
 HANDLERS.update({
-    "exclude_rows": exclude_rows,
-    "duplicate_strategy": duplicate_strategy,
-    "set_date_format": set_date_format,
+    EXCLUDE_ROWS: exclude_rows,
+    DUPLICATE_STRATEGY: duplicate_strategy,
+    SET_DATE_FORMAT: set_date_format,
 })

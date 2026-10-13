@@ -4,9 +4,8 @@ from __future__ import annotations
 
 import pandas as pd
 
-from recon.schema import FEEDS, ROW_HASH, SOURCE_ROW
+from recon.pipeline import FEEDS, ROW_HASH, SOURCE_ROW
 
-AMOUNT_COLUMNS = {"oms": "order_amount", "bank": "credit_amount", "logistics": "cod_collected"}
 DELTA_COLUMNS = ("amount_delta", "credit_delta", "cod_amount_delta", "fee_delta", "cod_fee_delta")
 
 

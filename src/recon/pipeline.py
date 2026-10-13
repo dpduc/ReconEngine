@@ -1,4 +1,7 @@
-"""Public entry point: ``inspect`` then ``run``. UIs and CLIs are thin shells over these."""
+"""Public entry point: ``inspect`` then ``run``. UIs and CLIs are thin shells over these.
+
+Everything a shell needs (config types, fix-option ids, schema names) is re-exported here.
+"""
 
 from __future__ import annotations
 
@@ -8,19 +11,57 @@ from pathlib import Path
 
 import pandas as pd
 
+from recon.acknowledgement import acknowledge_warnings, acknowledgements
 from recon.checks import run_checks, run_raw_checks
-from recon.config import RunConfig
+from recon.config import EVIDENCE, PAYMENT, SHIPMENT, FeedSpec, Policy, Resolution, RunConfig, load_config, save_config
 from recon.evaluation import attach_truth, metrics
 from recon.funnel import RULE_VERSION, STEPS, FunnelContext, build_units, run_funnel
-from recon.acknowledgement import acknowledgements
 from recon.funnel.orphans import orphan_counts, reverse_pass
-from recon.health import HealthReport
-from recon.profiles import run_profiles
+from recon.health import (
+    ACKNOWLEDGE,
+    DUPLICATE_STRATEGY,
+    EXCLUDE_ROWS,
+    REMAP,
+    SET_DATE_FORMAT,
+    SET_STATUS_POLICY,
+    FixOption,
+    HealthReport,
+    Issue,
+    Severity,
+)
 from recon.ingest import LoadedFeed, file_sha256, load_feed, parse_numeric
-from recon.mapping import DraftConfig, MappingProfile, draft_config, load_profile, save_profile, suggest_mapping  # noqa: F401  (public API)
-from recon.resolutions import apply_resolutions
+from recon.mapping import DraftConfig, MappingProfile, Suggestion, draft_config, load_profile, save_profile, suggest_mapping
+from recon.profiles import run_profiles
+from recon.resolutions import apply_resolutions, resolve, undo
 from recon.results import BLOCKED, COMPLETED, EXCLUDED_COLUMNS, ReconRun
-from recon.schema import EXCLUDED_BY, EXCLUSION_REASON, ROW_HASH, SOURCE_FILE, SOURCE_ROW
+from recon.schema import (
+    AMOUNT_COLUMNS,
+    AUTO_ACCEPT,
+    EXCEPTION,
+    EXCLUDED_BY,
+    EXCLUSION_REASON,
+    FEED_LABELS,
+    FEEDS,
+    FILE_EXTENSIONS,
+    REVIEW,
+    ROW_HASH,
+    SOURCE_FILE,
+    SOURCE_ROW,
+)
+
+__all__ = [
+    "inspect", "run",
+    # config
+    "RunConfig", "FeedSpec", "Policy", "Resolution", "load_config", "save_config", "EVIDENCE", "PAYMENT", "SHIPMENT",
+    # health and fixes
+    "HealthReport", "Issue", "FixOption", "Severity", "resolve", "undo", "acknowledge_warnings",
+    "ACKNOWLEDGE", "REMAP", "EXCLUDE_ROWS", "DUPLICATE_STRATEGY", "SET_DATE_FORMAT", "SET_STATUS_POLICY",
+    # mapping
+    "DraftConfig", "MappingProfile", "Suggestion", "draft_config", "suggest_mapping", "load_profile", "save_profile",
+    # results and schema
+    "ReconRun", "AUTO_ACCEPT", "REVIEW", "EXCEPTION", "FEEDS", "FEED_LABELS", "FILE_EXTENSIONS", "AMOUNT_COLUMNS",
+    "ROW_HASH", "SOURCE_ROW",
+]
 
 
 @dataclass(frozen=True)
@@ -75,7 +116,7 @@ def run(sources: str | Path, config: RunConfig) -> ReconRun:
     prepared = _prepare(sources, config)
     if not prepared.report.gate_open:
         return ReconRun(status=BLOCKED, health=prepared.report, excluded=prepared.excluded)
-    ctx = FunnelContext(feeds=prepared.feeds, policy=config.policy)
+    ctx = FunnelContext(feeds=prepared.feeds, policy=config.resolved_policy)
     results, funnel_counts = run_funnel(build_units(prepared.feeds), STEPS, ctx)
     orphans, reverse_counts = reverse_pass(results, prepared.feeds)
     funnel_counts = pd.concat([funnel_counts, pd.DataFrame([reverse_counts])], ignore_index=True)

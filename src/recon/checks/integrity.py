@@ -6,7 +6,7 @@ import pandas as pd
 
 from recon.checks import register, register_raw
 from recon.config import RunConfig
-from recon.health import FixOption, Issue, Severity
+from recon.health import DUPLICATE_STRATEGY, EXCLUDE_ROWS, SET_DATE_FORMAT, FixOption, Issue, Severity
 from recon.schema import CURRENCY, DATE_COLUMNS, NUMERIC_COLUMNS, PRIMARY_KEYS, SOURCE_ROW, review_column
 
 SAMPLE_SIZE = 5
@@ -19,7 +19,7 @@ def sample_rows(frame: pd.DataFrame, columns: list[str]) -> tuple[dict, ...]:
 
 
 def exclude_option(feed: str, rows: pd.DataFrame, label: str) -> FixOption:
-    return FixOption("exclude_rows", label,
+    return FixOption(EXCLUDE_ROWS, label,
                      {"feed": feed, "source_rows": [int(r) for r in rows[SOURCE_ROW]], "reason": ""})
 
 
@@ -80,7 +80,7 @@ def unparseable_date(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[
                 continue
             candidates = [fmt for fmt in DATE_FORMAT_CANDIDATES
                           if parse_dates(bad[column], fmt).notna().all()]
-            option = FixOption("set_date_format", f"Choose the date format of '{feed}'",
+            option = FixOption(SET_DATE_FORMAT, f"Choose the date format of '{feed}'",
                                {"feed": feed, "date_format": candidates[0] if candidates else None,
                                 "candidates": candidates})
             issues.append(_parse_issue(feed, column, bad, "unparseable_date", "dates", (option,)))
@@ -134,7 +134,7 @@ def duplicate_key(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Iss
             message=f"{feed}: {dupes[key].nunique()} '{key}' values occur more than once ({len(dupes)} rows)",
             sample_rows=sample_rows(dupes.sort_values([key, SOURCE_ROW]), [key]),
             fix_options=tuple(
-                FixOption("duplicate_strategy", label, {"feed": feed, "strategy": strategy})
+                FixOption(DUPLICATE_STRATEGY, label, {"feed": feed, "strategy": strategy})
                 for strategy, label in (("keep_first", "Keep the first row per key"),
                                         ("keep_latest", "Keep the latest row per key"),
                                         ("review", "Route all duplicates to review"))

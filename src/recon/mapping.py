@@ -18,10 +18,7 @@ import pandas as pd
 
 from recon.config import FeedSpec, RunConfig
 from recon.ingest import READERS, detect_delimiter, detect_encoding
-from recon.schema import REQUIRED_COLUMNS
-
-FORMATS = {".csv": "csv", ".txt": "csv", ".tsv": "csv", ".xlsx": "xlsx", ".xlsm": "xlsx",
-           ".parquet": "parquet", ".pq": "parquet"}
+from recon.schema import FILE_EXTENSIONS, REQUIRED_COLUMNS
 
 # Header names other systems use for each canonical column.
 SYNONYMS: dict[str, tuple[str, ...]] = {
@@ -73,7 +70,6 @@ class Suggestion:
     confidence: float
     flagged: bool  # True = needs the analyst; not applied to the draft mapping
     reason: str
-    alternatives: tuple[str, ...] = ()  # other plausible source columns, best first
 
 
 @dataclass(frozen=True)
@@ -169,7 +165,6 @@ def suggest_mapping(feed: str, frame: pd.DataFrame) -> dict[str, Suggestion]:
             continue
         confidence = round(score[(c, source)], 3)
         ranked = sorted((s for s in sample.columns if s != source), key=lambda s: -score[(c, s)])
-        alternatives = tuple(s for s in ranked if score[(c, s)] >= MIN_CONFIDENCE)
         # A rival is a close runner-up that isn't clearly better used elsewhere.
         rivals = [s for s in ranked
                   if score[(c, s)] >= confidence - AMBIGUITY_MARGIN
@@ -180,12 +175,12 @@ def suggest_mapping(feed: str, frame: pd.DataFrame) -> dict[str, Suggestion]:
             flagged, reason = True, f"ambiguous with {', '.join(rivals)}"
         else:
             flagged, reason = False, f"header match, {kinds[source]} values"
-        suggestions[c] = Suggestion(feed, c, source, confidence, flagged, reason, alternatives)
+        suggestions[c] = Suggestion(feed, c, source, confidence, flagged, reason)
     return suggestions
 
 
 def _feed_spec(folder: Path, path: str) -> FeedSpec:
-    fmt = FORMATS.get(Path(path).suffix.lower())
+    fmt = FILE_EXTENSIONS.get(Path(path).suffix.lower())
     if fmt is None:
         raise ValueError(f"{path}: cannot infer format from extension")
     if fmt != "csv":

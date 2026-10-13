@@ -6,7 +6,7 @@ import pandas as pd
 
 from recon.checks import register
 from recon.config import RunConfig
-from recon.health import FixOption, Issue, Severity
+from recon.health import REMAP, FixOption, Issue, Severity
 from recon.schema import LINEAGE_COLUMNS, REQUIRED_COLUMNS
 
 
@@ -25,7 +25,7 @@ def missing_required_column(feeds: dict[str, pd.DataFrame], config: RunConfig) -
                 feed=feed,
                 affected_rows=len(frame),
                 message=f"{feed}: required column '{column}' is missing after mapping",
-                fix_options=(FixOption("remap", f"Map a source column to '{column}'",
+                fix_options=(FixOption(REMAP, f"Map a source column to '{column}'",
                                        {"feed": feed, "canonical": column, "candidates": unmapped}),),
             ))
     return issues

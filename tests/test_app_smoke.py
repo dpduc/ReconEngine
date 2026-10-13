@@ -77,7 +77,9 @@ def test_flagged_mapping_is_remapped_on_the_fix_page():
         at.selectbox(key=f"remap:{issue_id}").select(source).run()
         at.button(key=f"apply:{issue_id}").click().run()
         assert not at.exception
-    assert at.session_state["config"].mapping["bank"]["credit_amount"] == "Amt1"
+    remaps = {r.params["canonical"]: r.params["source"] for r in at.session_state["config"].resolutions
+              if r.option == "remap"}
+    assert remaps == {"credit_amount": "Amt1", "fee_amount": "Amt2", "net_amount": "Amt3"}
     assert at.session_state["health"].gate_open
 
 

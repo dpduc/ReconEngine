@@ -45,18 +45,18 @@ SAMPLE_SIZE = 5
 
 
 def warning(issue_id: str, check: str, feed: str, frame: pd.DataFrame, mask: pd.Series,
-            message: str) -> Issue:
-    """A warning on the rows of `frame` selected by `mask`; it must be acknowledged before `run`."""
+            message: str, fixes: tuple[FixOption, ...] = ()) -> Issue:
+    """A warning on the rows of `frame` selected by `mask`; it must be fixed or acknowledged before `run`."""
     sample = frame[mask].head(SAMPLE_SIZE).astype(object)
     sample = sample.where(sample.notna(), None)
     return Issue(
         id=issue_id, check=check, severity=Severity.WARNING, feed=feed,
         affected_rows=int(mask.sum()), message=message,
         sample_rows=tuple(sample.to_dict("records")),
-        fix_options=(FixOption(ACKNOWLEDGE, "Acknowledge with a note"),),
+        fix_options=fixes + (FixOption(ACKNOWLEDGE, "Acknowledge with a note"),),
     )
 
 
 from recon.checks import columns  # noqa: E402,F401  (registers checks)
 from recon.checks import integrity  # noqa: E402,F401
-from recon.checks import amounts, coverage, events  # noqa: E402,F401  (warning checks)
+from recon.checks import amounts, coverage, events, policy  # noqa: E402,F401  (warning checks)

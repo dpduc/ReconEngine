@@ -1,10 +1,21 @@
 """Fix: pick a fix option or acknowledge each open issue; choices become run-config resolutions."""
 
+from typing import Callable
+
 import pandas as pd
 import streamlit as st
 
-from recon.health import ACKNOWLEDGE, Severity
-from recon_app import fixes, state
+from recon.pipeline import (
+    ACKNOWLEDGE,
+    EXCLUDE_ROWS,
+    REMAP,
+    SET_DATE_FORMAT,
+    Severity,
+    acknowledge_warnings,
+    resolve,
+    undo,
+)
+from recon_app import state
 
 st.title("Fix")
 sources, config = state.inputs()
@@ -16,27 +27,44 @@ def apply(new_config) -> None:
     st.rerun()
 
 
+def remap_params(issue, params: dict) -> bool:
+    candidates = params.pop("candidates", [])
+    if not candidates:
+        st.warning("No unmapped source column is left; reload the right export on the Load page.")
+    params["source"] = st.selectbox("Source column", candidates, index=None, key=f"remap:{issue.id}",
+                                    placeholder="Choose a column")
+    return params["source"] is not None
+
+
+def date_format_params(issue, params: dict) -> bool:
+    candidates = params.pop("candidates", [])
+    params["date_format"] = st.selectbox(
+        "Date format", candidates, index=0 if candidates else None, accept_new_options=True,
+        key=f"date_format:{issue.id}", placeholder="strftime format, e.g. %d/%m/%Y")
+    return bool(params["date_format"])
+
+
+def exclude_params(issue, params: dict) -> bool:
+    st.caption(f"{len(params['source_rows']):,} row(s) of '{params['feed']}' will be excluded "
+               "and listed in the run's excluded rows.")
+    params["reason"] = st.text_input("Reason", key=f"reason:{issue.id}")
+    return True
+
+
+# Fix option id -> widgets that complete its params in place; returns whether they are complete.
+# Options not listed here need no input.
+OPTION_INPUTS: dict[str, Callable[[object, dict], bool]] = {
+    REMAP: remap_params,
+    SET_DATE_FORMAT: date_format_params,
+    EXCLUDE_ROWS: exclude_params,
+}
+
+
 def option_params(issue, option) -> tuple[dict, bool]:
     """Render the widgets the fix option needs; return its params and whether it is complete."""
     params = dict(option.params)
-    if option.id == fixes.REMAP:
-        candidates = params.pop("candidates", [])
-        if not candidates:
-            st.warning("No unmapped source column is left; reload the right export on the Load page.")
-        params["source"] = st.selectbox("Source column", candidates, index=None, key=f"remap:{issue.id}",
-                                        placeholder="Choose a column")
-        return params, params["source"] is not None
-    if option.id == "set_date_format":
-        candidates = params.pop("candidates", [])
-        params["date_format"] = st.selectbox(
-            "Date format", candidates, index=0 if candidates else None, accept_new_options=True,
-            key=f"date_format:{issue.id}", placeholder="strftime format, e.g. %d/%m/%Y")
-        return params, bool(params["date_format"])
-    if option.id == "exclude_rows":
-        st.caption(f"{len(params['source_rows']):,} row(s) of '{params['feed']}' will be excluded "
-                   "and listed in the run's excluded rows.")
-        params["reason"] = st.text_input("Reason", key=f"reason:{issue.id}")
-    return params, True
+    inputs = OPTION_INPUTS.get(option.id)
+    return params, inputs(issue, params) if inputs else True
 
 
 if health.gate_open:
@@ -53,7 +81,7 @@ if open_warnings:
                              placeholder="Why these warnings are acceptable for this run")
         if st.button("Acknowledge all", key="acknowledge_all", icon=":material/done_all:",
                      disabled=not note.strip()):
-            apply(fixes.acknowledge_all(config, health, note))
+            apply(acknowledge_warnings(config, health, note.strip()))
 
 for issue in sorted(health.open_issues, key=lambda i: i.severity is not Severity.BLOCKING):
     with st.container(border=True):
@@ -67,11 +95,11 @@ for issue in sorted(health.open_issues, key=lambda i: i.severity is not Severity
         label = st.selectbox("Fix", labels, key=f"option:{issue.id}")
         option = issue.fix_options[labels.index(label)]
         params, complete = option_params(issue, option)
-        needs_note = option.id == ACKNOWLEDGE
-        note = st.text_input("Note" + (" (required)" if needs_note else ""), key=f"note:{issue.id}")
+        note_required = option.id == ACKNOWLEDGE
+        note = st.text_input("Note" + (" (required)" if note_required else ""), key=f"note:{issue.id}")
         if st.button("Apply", key=f"apply:{issue.id}", type="primary",
-                     disabled=not complete or (needs_note and not note.strip())):
-            apply(fixes.resolve(config, issue.id, option.id, params, note))
+                     disabled=not complete or (note_required and not note.strip())):
+            apply(resolve(config, issue.id, option.id, params, note))
 
 st.subheader("Run config")
 if config.resolutions:
@@ -80,7 +108,7 @@ if config.resolutions:
             st.markdown(f"`{resolution.issue_id}` → **{resolution.option}**"
                         + (f" · {resolution.note}" if resolution.note else ""), width="stretch")
             if st.button("Undo", key=f"undo:{index}", icon=":material/undo:", type="tertiary"):
-                apply(fixes.undo(config, index))
+                apply(undo(config, index))
 else:
     st.caption("No resolutions yet.")
 st.download_button("Download run config", config.to_json(), "run_config.json", "application/json",

@@ -197,3 +197,26 @@ def test_placeholder_timestamps_in_a_whole_column_are_a_warning(tmp_path):
     report = inspect(tmp_path, write_sources(tmp_path, oms=oms))
     found = warnings_of(report, "placeholder_timestamp")
     assert {k: v.affected_rows for k, v in found.items()} == {"placeholder_timestamp:oms:ordered_at": 4}
+
+
+def test_statuses_outside_the_policy_are_warnings_fixed_by_setting_their_evidence(tmp_path):
+    from recon.pipeline import resolve
+
+    oms = OMS.replace("70.00,2024-01-03T09:15:00,shipped", "70.00,2024-01-03T09:15:00,canceled")
+    ship = SHIP.replace("T3,ORD2024-0000003,0,5.0,0,SHIPPED,2024-01-04T07:55:00,\n", "")
+    config = write_sources(tmp_path, oms=oms, ship=ship,
+                           resolutions=(Resolution("coverage:oms:no_shipment", "acknowledge", note="canceled"),))
+    report = inspect(tmp_path, config)
+    issue = warnings_of(report, "status_not_in_policy")["status_not_in_policy:canceled"]
+    assert issue.affected_rows == 1
+    assert not report.gate_open
+    assert "acknowledge" in {option.id for option in issue.fix_options}
+    payment_only = next(o for o in issue.fix_options if o.params.get("evidence") == ["payment"])
+
+    resolved = resolve(config, issue.id, payment_only.id, payment_only.params)
+    assert resolved.policy == config.policy  # the policy change lives in the resolution, replayably
+    report = inspect(tmp_path, resolved)
+    assert "status_not_in_policy:canceled" not in {i.id for i in report.issues}
+    assert report.gate_open
+    results = run(tmp_path, resolved).results.set_index("order_id")
+    assert results.loc["ORD2024-0000003", "decision"] == "AUTO_ACCEPT"

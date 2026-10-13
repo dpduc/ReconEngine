@@ -3,11 +3,15 @@
 from __future__ import annotations
 
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-EVIDENCE = ("payment", "shipment")
+from recon.health import SET_STATUS_POLICY
+
+# Evidence an order status can require before its unit ties out.
+PAYMENT, SHIPMENT = "payment", "shipment"
+EVIDENCE = (PAYMENT, SHIPMENT)
 
 
 def _default_status_policy() -> dict[str, tuple[str, ...]]:
@@ -65,6 +69,20 @@ class RunConfig:
     policy: Policy = Policy()
     resolutions: tuple[Resolution, ...] = ()
     ground_truth: str | None = None  # optional truth CSV, relative to the sources folder
+
+    @property
+    def resolved_policy(self) -> Policy:
+        """`policy` with the status evidence that `set_status_policy` resolutions chose."""
+        chosen = {r.params["status"]: tuple(r.params["evidence"])
+                  for r in self.resolutions if r.option == SET_STATUS_POLICY}
+        if not chosen:
+            return self.policy
+        return replace(self.policy, status_policy={**self.policy.status_policy, **chosen})
+
+    def date_format(self, feed: str) -> str | None:
+        """The feed's declared strftime date format, if any."""
+        spec = self.feeds.get(feed)
+        return spec.date_format if spec else None
 
     def to_dict(self) -> dict[str, Any]:
         out = asdict(self)

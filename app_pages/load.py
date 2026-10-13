@@ -6,19 +6,18 @@ from pathlib import Path
 
 import streamlit as st
 
-from recon.pipeline import MappingProfile, load_profile, save_profile
+from recon.pipeline import FEED_LABELS, FILE_EXTENSIONS, MappingProfile, load_profile, save_profile
 from recon_app import state
 
-FEEDS = {"oms": "OMS orders", "bank": "Bank statement", "logistics": "Logistics report"}
-TYPES = ["csv", "txt", "tsv", "xlsx", "xlsm", "parquet", "pq"]
+TYPES = [extension.lstrip(".") for extension in FILE_EXTENSIONS]
 UNMAPPED = "(not mapped)"
 
 st.title("Load")
 st.caption("Upload the three exports as they come out of each system; nothing is changed in the files.")
 
-columns = st.columns(len(FEEDS))
+columns = st.columns(len(FEED_LABELS))
 uploads = {feed: column.file_uploader(label, type=TYPES, key=f"upload_{feed}")
-           for column, (feed, label) in zip(columns, FEEDS.items())}
+           for column, (feed, label) in zip(columns, FEED_LABELS.items())}
 profile_uploads = st.file_uploader(
     "Mapping profiles (optional)", type="json", accept_multiple_files=True, key="upload_profiles",
     help="Profiles saved from an earlier upload; a profile whose columns are all present is reused as-is.")
@@ -46,7 +45,7 @@ st.subheader("Mapping")
 st.caption("Each required column is mapped to a source column. Flagged suggestions are left unmapped: "
            "confirm them here or fix them later from the Health Report.")
 mapping = {}
-for feed, label in FEEDS.items():
+for feed, label in FEED_LABELS.items():
     with st.container(border=True):
         st.markdown(f"**{label}** · `{files[feed]}`")
         options = [UNMAPPED, *draft.columns[feed]]
@@ -73,7 +72,7 @@ with st.expander("Save mapping profiles", icon=":material/save:"):
     st.caption("Download a profile per feed to reuse this mapping for the next export from the same system.")
     system = st.text_input("Source system", placeholder="e.g. acme-bank", key="profile_system")
     with st.container(horizontal=True):
-        for feed, label in FEEDS.items():
+        for feed, label in FEED_LABELS.items():
             with tempfile.TemporaryDirectory() as tmp:
                 path = Path(tmp) / "profile.json"
                 save_profile(MappingProfile(system.strip() or feed, feed, mapping[feed]), path)

@@ -7,8 +7,13 @@ from dataclasses import asdict, dataclass, field
 from enum import Enum
 from typing import Any
 
-# Fix option / resolution that accepts a warning as-is; it needs a non-empty note.
-ACKNOWLEDGE = "acknowledge"
+# Fix option ids; a resolution names the one the analyst chose.
+ACKNOWLEDGE = "acknowledge"  # accept a warning as-is; needs a non-empty note
+REMAP = "remap"  # params: feed, canonical, source
+EXCLUDE_ROWS = "exclude_rows"  # params: feed, source_rows, reason
+DUPLICATE_STRATEGY = "duplicate_strategy"  # params: feed, strategy
+SET_DATE_FORMAT = "set_date_format"  # params: feed, date_format
+SET_STATUS_POLICY = "set_status_policy"  # params: status, evidence
 
 
 class Severity(str, Enum):
