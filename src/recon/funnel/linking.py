@@ -15,6 +15,7 @@ from recon.funnel.base import FunnelContext, StepOutcome, decide, lineage_prefix
 
 ORDER_REF = re.compile(r"(ORD\d{4}-\d{7}|[0-9a-f]{32})", re.IGNORECASE)
 CANDIDATE_MAX_SCORE = 0.5  # pass 3 scores stay well below any accept threshold
+CANDIDATE_ROWS = "bank_candidate_rows"  # '|'-joined bank source rows listed as pass 3 candidates
 
 
 def extract_order_ref(description: Any) -> str | None:
@@ -29,11 +30,16 @@ def bank_order_refs(bank: pd.DataFrame) -> pd.Series:
     return bank["description"].map(extract_order_ref)
 
 
-def _link_one_to_one(units: pd.DataFrame, other: pd.DataFrame, unit_key: str, other_key: str,
-                     suffixes: tuple[str, str], link_column: str) -> pd.DataFrame:
-    """Left-join `other` where the key is unique on both sides; ambiguous keys stay unlinked."""
+def _link_one_to_one(units: pd.DataFrame, all_keys: pd.Series, other: pd.DataFrame, unit_key: str,
+                     other_key: str, suffixes: tuple[str, str], link_column: str) -> pd.DataFrame:
+    """Left-join `other` where the key is unique on both sides; ambiguous keys stay unlinked.
+
+    Uniqueness on the unit side is judged over `all_keys` (every OMS order), so a subset of
+    units links exactly as it would together with the rest.
+    """
     other = other[other[other_key].notna() & ~other[other_key].duplicated(keep=False)]
-    linkable = units[unit_key].notna() & ~units[unit_key].duplicated(keep=False)
+    ambiguous = all_keys[all_keys.duplicated(keep=False)]
+    linkable = units[unit_key].notna() & ~units[unit_key].isin(ambiguous)
     keyed = units.assign(_link_key=units[unit_key].where(linkable))
     out = keyed.merge(other, left_on="_link_key", right_on=other_key, how="left",
                       suffixes=suffixes, indicator="_linked")
@@ -41,13 +47,19 @@ def _link_one_to_one(units: pd.DataFrame, other: pd.DataFrame, unit_key: str, ot
     return out.drop(columns=["_link_key", "_linked"])
 
 
-def link_exact(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
-    """Pass 1: exact order reference, one-to-one only."""
+def attach_exact(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
+    """`units` enriched with the bank and logistics records naming them (one-to-one only)."""
     bank = _bank_frame(ctx)
     logistics = lineage_prefixed(ctx.feeds["logistics"], "logistics")
-    linked = _link_one_to_one(units, bank, "order_id", "order_ref", ("_oms", "_bank"), "bank_link_pass")
-    linked = _link_one_to_one(linked, logistics, "order_id", "client_order_code", ("", "_logistics"),
-                              "logistics_link_pass")
+    orders = ctx.feeds["oms"]["order_id"].dropna()
+    linked = _link_one_to_one(units, orders, bank, "order_id", "order_ref", ("_oms", "_bank"), "bank_link_pass")
+    return _link_one_to_one(linked, orders, logistics, "order_id", "client_order_code", ("", "_logistics"),
+                            "logistics_link_pass")
+
+
+def link_exact(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
+    """Pass 1: exact order reference, one-to-one only."""
+    linked = attach_exact(units, ctx)
     return StepOutcome(decided=linked.iloc[0:0], remaining=linked)
 
 
@@ -134,15 +146,18 @@ def link_candidates(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
     bank = _bank_frame(ctx)
     pairs = pairs.assign(txn_ref=bank.loc[pairs["bank_pos"], "txn_ref"].to_numpy(),
                          score=(CANDIDATE_MAX_SCORE * (1 - pairs["day_gap"] / (2 * window + 1))).round(4))
+    pairs = pairs.assign(source_row=bank.loc[pairs["bank_pos"], "bank_source_row"].to_numpy())
     pairs = pairs.sort_values(["unit_id", "score", "txn_ref"], ascending=[True, False, True])
     grouped = pairs.groupby("unit_id")
     listed = grouped.apply(lambda g: "|".join(f"{t}:{s:.4f}" for t, s in zip(g["txn_ref"], g["score"])),
                            include_groups=False)
+    candidate_rows = grouped["source_row"].agg(lambda rows: "|".join(str(int(r)) for r in rows))
     confidence = (grouped["score"].max() / grouped.size()).round(4)
 
     has_candidates = units["unit_id"].isin(listed.index)
     review, remaining = units[has_candidates].copy(), units[~has_candidates]
     review["link_candidates"] = review["unit_id"].map(listed)
+    review[CANDIDATE_ROWS] = review["unit_id"].map(candidate_rows)
     reasons = review["logistics_link_pass"].isna().map({True: "LINK_CANDIDATES|MISSING_SHIPMENT",
                                                         False: "LINK_CANDIDATES"})
     decided = decide(review, "REVIEW", review["unit_id"].map(confidence), reasons)

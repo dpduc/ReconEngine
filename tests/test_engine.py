@@ -68,3 +68,8 @@ def test_benchmark_links_only_through_pass_1(benchmark_run):
     results = benchmark_run.results
     assert set(results["bank_link_pass"].dropna()) == {"exact"}
     assert not results["deciding_step"].isin(["link_constrained", "link_candidates"]).any()
+
+
+def test_benchmark_has_no_orphans(benchmark_run):
+    # Every generated bank and logistics record names an Olist order, decided or not.
+    assert benchmark_run.orphans.empty

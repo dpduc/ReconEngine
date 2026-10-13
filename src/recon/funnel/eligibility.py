@@ -1,4 +1,8 @@
-"""Eligibility steps: decide units that can't be reconciled before any evidence is looked at."""
+"""Eligibility steps: decide units that can't be reconciled before any evidence is looked at.
+
+Decided units still carry the records that name them exactly, for lineage; those records
+are theirs, not orphans.
+"""
 
 from __future__ import annotations
 
@@ -6,6 +10,7 @@ import pandas as pd
 
 from recon.config import EVIDENCE
 from recon.funnel.base import FunnelContext, StepOutcome, split
+from recon.funnel.linking import attach_exact
 from recon.funnel.reasons import exception
 
 STATUS_COLUMN = "order_status"
@@ -14,7 +19,7 @@ STATUS_COLUMN = "order_status"
 def missing_source_evidence(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
     """No order amount: there is nothing to compare the money against."""
     missing, remaining = split(units, units["order_amount"].isna())
-    return StepOutcome(decided=exception(missing, "MISSING_SOURCE_EVIDENCE"), remaining=remaining)
+    return StepOutcome(decided=exception(attach_exact(missing, ctx), "MISSING_SOURCE_EVIDENCE"), remaining=remaining)
 
 
 def status_policy(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
@@ -33,4 +38,4 @@ def status_policy(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
         requires_payment=[("payment" in n) for n in needs.dropna()],
         requires_shipment=[("shipment" in n) for n in needs.dropna()],
     )
-    return StepOutcome(decided=exception(pending, "ORDER_STATUS_REQUIRES_POLICY"), remaining=remaining)
+    return StepOutcome(decided=exception(attach_exact(pending, ctx), "ORDER_STATUS_REQUIRES_POLICY"), remaining=remaining)

@@ -15,7 +15,7 @@ import pandas as pd
 from recon.config import Policy
 from recon.schema import INGESTED_AT, LINEAGE_COLUMNS
 
-RULE_VERSION = "1.2.0"  # bump whenever funnel logic changes
+RULE_VERSION = "1.3.0"  # bump whenever funnel logic changes
 
 HASH_COLUMNS = ("oms_row_hash", "bank_row_hash", "logistics_row_hash")
 

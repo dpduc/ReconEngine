@@ -26,6 +26,39 @@ def test_unlinked_bank_and_logistics_records_become_orphans(tmp_path):
     assert len(outcome.results) == 3
 
 
+def test_records_of_orders_decided_before_linking_are_attached_not_orphaned(tmp_path):
+    from test_funnel_order import order, payment, run_feeds, shipment
+
+    # Order 1 has no amount, order 2 has a status the policy doesn't cover: both are decided
+    # before linking, yet their payment and shipment name them and are not orphans.
+    outcome = run_feeds(tmp_path, oms=[order(1, amount=""), order(2, status="canceled"), order(3)],
+                        bank=[payment(1), payment(2), payment(3)],
+                        ship=[shipment(1), shipment(2), shipment(3)])
+
+    assert outcome.orphans.empty
+    results = outcome.results.set_index("order_id")
+    assert results.loc["ORD2024-0000001", "reason_codes"] == "MISSING_SOURCE_EVIDENCE"
+    assert results.loc["ORD2024-0000002", "reason_codes"] == "ORDER_STATUS_REQUIRES_POLICY"
+    assert results.loc["ORD2024-0000001", "txn_ref"] == "P1"
+    assert results.loc["ORD2024-0000002", "tracking_code"] == "T2"
+    # Each unit traces to its OMS, bank and logistics rows.
+    assert results["input_row_hashes"].str.split("|").map(len).eq(3).all()
+
+
+def test_pass_3_candidate_payments_are_not_also_orphans(tmp_path):
+    from test_linking import OMS_TWO, SHIP_TWO
+    from test_linking import write_sources as write_linking_sources
+
+    bank = ("P1,PAYMENT ORD2024-0000001,100.00,0,100.00,2024-01-02\n"
+            "P2,TRANSFER RECEIVED,42.50,0,42.50,2024-01-11\n"
+            "P3,TRANSFER RECEIVED,42.50,0,42.50,2024-01-11\n")
+    config = write_linking_sources(tmp_path, oms=OMS_TWO, bank=bank, ship=SHIP_TWO)
+    outcome = run(tmp_path, acknowledged(tmp_path, config))
+
+    assert outcome.results.set_index("order_id").loc["ORD2024-0000002", "decision"] == "REVIEW"
+    assert outcome.orphans.empty
+
+
 def test_exception_queue_ranks_by_amount_at_risk_then_age(tmp_path):
     # Unit 2: amount mismatch on a 50.00 order; unit 3: missing payment on 70.00 (ordered 01-03).
     # P9: 70.00 orphan payment valued 01-20 (outside any linking date window) ties with unit 3 but is younger. T9: orphan, 12.00 COD.
