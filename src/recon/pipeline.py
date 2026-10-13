@@ -77,7 +77,8 @@ def run(sources: str | Path, config: RunConfig) -> ReconRun:
         return ReconRun(status=BLOCKED, health=prepared.report, excluded=prepared.excluded)
     ctx = FunnelContext(feeds=prepared.feeds, policy=config.policy)
     results, funnel_counts = run_funnel(build_units(prepared.feeds), STEPS, ctx)
-    orphans = reverse_pass(results, prepared.feeds)
+    orphans, reverse_counts = reverse_pass(results, prepared.feeds)
+    funnel_counts = pd.concat([funnel_counts, pd.DataFrame([reverse_counts])], ignore_index=True)
     input_files = {name: {"path": config.feeds[name].path, "sha256": loaded.sha256}
                    for name, loaded in prepared.inputs.items()}
     if config.ground_truth:

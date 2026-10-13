@@ -24,6 +24,9 @@ def test_unlinked_bank_and_logistics_records_become_orphans(tmp_path):
     assert outcome.orphans["input_row_hashes"].str.len().gt(0).all()
     # OMS-driven units are unaffected by the reverse pass.
     assert len(outcome.results) == 3
+    # The reverse pass is the funnel's last row: unlinked feed records in, orphans decided.
+    last = outcome.funnel.iloc[-1].to_dict()
+    assert last == {"step": "reverse_pass", "units_in": 2, "decided": 2, "passed_on": 0}
 
 
 def test_records_of_orders_decided_before_linking_are_attached_not_orphaned(tmp_path):
@@ -57,6 +60,8 @@ def test_pass_3_candidate_payments_are_not_also_orphans(tmp_path):
 
     assert outcome.results.set_index("order_id").loc["ORD2024-0000002", "decision"] == "REVIEW"
     assert outcome.orphans.empty
+    last = outcome.funnel.iloc[-1].to_dict()
+    assert last == {"step": "reverse_pass", "units_in": 2, "decided": 0, "passed_on": 2}
 
 
 def test_exception_queue_ranks_by_amount_at_risk_then_age(tmp_path):
@@ -135,7 +140,7 @@ def test_export_bundle_holds_every_artifact_and_reads_back(tmp_path):
     assert len(read("decisions.csv")) == 3
     assert list(read("orphans.csv")["txn_ref"]) == ["P9"]
     assert list(read("exception_queue.csv")["record_ref"]) == ["ORD2024-0000003", "P9", "ORD2024-0000002"]
-    assert read("funnel.csv")["decided"].sum() == 3
+    assert read("funnel.csv")["decided"].sum() == 3 + 1  # units, plus the orphan P9
     assert "decision" in read("triage_queue.csv").columns
     manifest = json.loads(bundle["manifest.json"])
     assert manifest["metrics"]["orphans"] == {"ORPHAN_PAYMENT": 1, "ORPHAN_SHIPMENT": 0}

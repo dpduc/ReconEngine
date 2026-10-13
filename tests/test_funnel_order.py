@@ -124,14 +124,15 @@ def test_funnel_counts_follow_step_order_and_add_up(tmp_path):
     assert list(funnel.index) == [
         "missing_source_evidence", "status_policy", "link_exact", "link_constrained", "link_candidates",
         "route_review", "missing_payment", "amount_mismatch", "missing_shipment", "fee_mismatch",
-        "cod_fee_mismatch", "timing_mismatch", "decision",
+        "cod_fee_mismatch", "timing_mismatch", "decision", "reverse_pass",
     ]
     assert funnel["decided"].to_dict() == {
         "missing_source_evidence": 1, "status_policy": 1, "link_exact": 0, "link_constrained": 0,
         "link_candidates": 0, "route_review": 0, "missing_payment": 1,
         "amount_mismatch": 0, "missing_shipment": 0, "fee_mismatch": 0, "cod_fee_mismatch": 0,
-        "timing_mismatch": 0, "decision": 1,
+        "timing_mismatch": 0, "decision": 1, "reverse_pass": 0,
     }
     assert (funnel["units_in"] == funnel["decided"] + funnel["passed_on"]).all()
-    assert (funnel["passed_on"].iloc[:-1].to_numpy() == funnel["units_in"].iloc[1:].to_numpy()).all()
-    assert funnel["decided"].sum() == len(outcome.results) == 4
+    units = funnel.drop(index="reverse_pass")  # the reverse pass examines feed records, not units
+    assert (units["passed_on"].iloc[:-1].to_numpy() == units["units_in"].iloc[1:].to_numpy()).all()
+    assert units["decided"].sum() == len(outcome.results) == 4

@@ -55,7 +55,7 @@ def test_funnel_counts_match_the_notebook_funnel(benchmark_run):
     # The notebook stops at "PASS"; timing runs after it: the 30 picked-after-delivered shipments.
     assert decided["timing_mismatch"] == 30
     assert decided["decision"] == 95296 + 66 - 30
-    assert decided.sum() == len(benchmark_run.results)
+    assert decided.drop("reverse_pass").sum() == len(benchmark_run.results)
 
 
 def test_bundled_fixture_meets_precision_bar(benchmark_run):
