@@ -1,5 +1,6 @@
 """Headless smoke checks of the wizard (Load -> Health -> Fix -> Run -> Review); the UI has no unit tests."""
 
+import hashlib
 import json
 import tempfile
 from pathlib import Path
@@ -153,3 +154,24 @@ def test_local_folder_is_read_in_place(tmp_path):
     assert at.session_state["sources"] == str(tmp_path)
     assert at.session_state["config"].feeds["bank"].path == "bank.csv"
     assert inspect(str(tmp_path), at.session_state["config"]).gate_open
+
+
+def test_reruns_do_not_rehash_uploaded_files(monkeypatch):
+    """Identifying in-memory sources must not re-hash their bytes on every rerun (slow on big exports)."""
+    at = upload(AppTest.from_file(APP, default_timeout=60).run(), renamed())
+    at.switch_page("app_pages/health.py").run()
+    at.switch_page("app_pages/fix.py").run()
+    content = {content for _, content in renamed().values()}
+    hashed = []
+    real_sha256 = hashlib.sha256
+
+    def counting_sha256(data=b"", **kwargs):
+        if data in content:
+            hashed.append(len(data))
+        return real_sha256(data, **kwargs)
+
+    monkeypatch.setattr(hashlib, "sha256", counting_sha256)
+    for page in ("app_pages/health.py", "app_pages/fix.py", "app_pages/load.py", "app_pages/run.py"):
+        at.switch_page(page).run()
+        assert not at.exception
+    assert hashed == []

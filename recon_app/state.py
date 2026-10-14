@@ -19,6 +19,7 @@ import json
 import zipfile
 from collections.abc import Mapping
 from dataclasses import replace
+from functools import cached_property
 from pathlib import Path
 
 import streamlit as st
@@ -57,14 +58,28 @@ def inputs() -> tuple[Sources, RunConfig]:
     return st.session_state[SOURCES], st.session_state[CONFIG]
 
 
+class MemorySources(dict):
+    """In-memory sources ``{relative path: bytes}`` whose content digest is computed once.
+
+    Every rerun asks for the inputs' identity; re-hashing tens of MB each time made every click slow.
+    Treat instances as immutable: build a new one (e.g. ``MemorySources({**old, path: data})``) to change it.
+    """
+
+    @cached_property
+    def key(self) -> str:
+        digest = hashlib.sha256()
+        for path, content in sorted(self.items()):
+            digest.update(path.encode() + b"\0" + hashlib.sha256(content).digest())
+        return f"memory:{digest.hexdigest()[:16]}"
+
+
 def sources_key(sources: Sources) -> str:
     """Stable identity of `sources` for caching and widget keys: the folder, or a content digest."""
-    if not isinstance(sources, Mapping):
-        return str(sources)
-    digest = hashlib.sha256()
-    for path, content in sorted(sources.items()):
-        digest.update(path.encode() + b"\0" + hashlib.sha256(content).digest())
-    return f"memory:{digest.hexdigest()[:16]}"
+    if isinstance(sources, MemorySources):
+        return sources.key
+    if isinstance(sources, Mapping):
+        return MemorySources(sources).key
+    return str(sources)
 
 
 def describe_inputs() -> str:
@@ -83,13 +98,23 @@ def use_benchmark() -> None:
     set_inputs(BENCHMARK_SOURCES, load_config(BENCHMARK_CONFIG))
 
 
-def upload_sources(files: dict[str, tuple[str, bytes]]) -> tuple[dict[str, bytes], dict[str, str]]:
-    """In-memory sources for `{feed: (file name, content)}` uploads, and `{feed: relative path}`.
+UPLOADS = "_uploads"  # (upload ids, sources, paths) of the last uploaded set, reused while unchanged
 
-    Raw bytes are kept exactly as uploaded; nothing is written to disk.
+
+def upload_sources(uploads: dict) -> tuple[MemorySources, dict[str, str]]:
+    """In-memory sources for `{feed: uploaded file}`, and `{feed: relative path}`.
+
+    Raw bytes are kept exactly as uploaded; nothing is written to disk. The same uploads
+    give back the same sources object, so its digest is not recomputed on reruns.
     """
-    paths = {feed: f"{feed}/{Path(name).name}" for feed, (name, _) in files.items()}
-    return {paths[feed]: content for feed, (_, content) in files.items()}, paths
+    ids = tuple((feed, upload.file_id) for feed, upload in sorted(uploads.items()))
+    memo = st.session_state.get(UPLOADS)
+    if memo is not None and memo[0] == ids:
+        return memo[1], memo[2]
+    paths = {feed: f"{feed}/{Path(upload.name).name}" for feed, upload in uploads.items()}
+    sources = MemorySources({paths[feed]: upload.getvalue() for feed, upload in uploads.items()})
+    st.session_state[UPLOADS] = (ids, sources, paths)
+    return sources, paths
 
 
 # Cached on `key` (see `sources_key`); the leading underscore keeps Streamlit from hashing the bytes.

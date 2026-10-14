@@ -23,7 +23,7 @@ def pick_uploads() -> tuple[dict[str, bytes], dict[str, str]] | None:
                for column, (feed, label) in zip(columns, FEED_LABELS.items())}
     if not all(uploads.values()):
         return None
-    return state.upload_sources({feed: (u.name, u.getvalue()) for feed, u in uploads.items()})
+    return state.upload_sources(uploads)
 
 
 def pick_folder() -> tuple[str, dict[str, str]] | None:

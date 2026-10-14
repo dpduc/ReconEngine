@@ -130,7 +130,7 @@ for issue in sorted(health.open_issues, key=lambda i: i.severity is not Severity
                      disabled=not complete or (note_required and not note.strip())):
             table = params.pop("_table_bytes", None)  # an uploaded rate table joins the in-memory sources
             apply(resolve(config, issue.id, option.id, params, note),
-                  {**sources, params["rate_table"]: table} if table is not None else None)
+                  state.MemorySources({**sources, params["rate_table"]: table}) if table is not None else None)
 
 st.subheader("Run config")
 if config.resolutions:
