@@ -16,6 +16,7 @@ SET_DATE_FORMAT = "set_date_format"  # params: feed, date_format
 SET_STATUS_POLICY = "set_status_policy"  # params: status, evidence
 CORRECT_CURRENCY = "correct_currency"  # params: feed, source_rows, currency
 ROUTE_TO_REVIEW = "route_to_review"  # params: feed, source_rows, reason (a reason code)
+CONVERT_CURRENCY = "convert_currency"  # params: rate_column, rate_table, tolerance (see FxPolicy)
 
 
 class Severity(str, Enum):

@@ -17,7 +17,7 @@ from recon.funnel.explain import explain_all
 from recon.ingest import parse_dates
 from recon.schema import INGESTED_AT, LINEAGE_COLUMNS
 
-RULE_VERSION = "1.4.0"  # bump whenever funnel logic changes
+RULE_VERSION = "1.5.0"  # bump whenever funnel logic changes
 
 HASH_COLUMNS = ("oms_row_hash", "bank_row_hash", "logistics_row_hash")
 
@@ -27,6 +27,7 @@ class FunnelContext:
     feeds: dict[str, pd.DataFrame]  # canonical feeds after resolutions
     policy: Policy  # with the run config's resolutions applied
     date_formats: dict[str, str | None] = field(default_factory=dict)  # feed -> declared strftime format
+    fx_rates: pd.DataFrame | None = None  # the policy's rate table, read (see funnel.fx)
 
     def dates(self, feed: str, values: pd.Series, utc: bool = False) -> pd.Series:
         """`values` (a date column of `feed`) parsed as the feed declares."""

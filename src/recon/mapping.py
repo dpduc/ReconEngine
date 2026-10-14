@@ -18,7 +18,7 @@ import pandas as pd
 
 from recon.config import FeedSpec, RunConfig
 from recon.ingest import READERS, Sources, detect_delimiter, detect_encoding, read_source
-from recon.schema import FILE_EXTENSIONS, REQUIRED_COLUMNS
+from recon.schema import CURRENCY, FEEDS, FILE_EXTENSIONS, REQUIRED_COLUMNS
 
 # Header names other systems use for each canonical column.
 SYNONYMS: dict[str, tuple[str, ...]] = {
@@ -38,7 +38,12 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "cod_collected": ("cod", "cod amount", "cash collected", "collected"),
     "ship_fee": ("shipping fee", "freight", "delivery fee", "ship cost", "shipping"),
     "cod_fee": ("cod fee", "cod charge", "collection fee"),
+    CURRENCY: ("ccy", "curr", "currency code", "currency iso", "moeda"),
 }
+
+# Optional canonical columns: suggested only on a clear header match, never flagged when absent.
+OPTIONAL_COLUMNS: dict[str, tuple[str, ...]] = {feed: (CURRENCY,) for feed in FEEDS}
+_CURRENCY_CODE = re.compile(r"[A-Za-z]{3}")
 
 # Value shapes each canonical column is expected to have.
 KINDS: dict[str, frozenset[str]] = {
@@ -139,8 +144,20 @@ def _kind(values: pd.Series) -> str:
     return "text"
 
 
+def _optional(feed: str, canonical: str, sample: pd.DataFrame, taken: set[str]) -> Suggestion:
+    """A clear header match whose values look right, else an unflagged empty suggestion."""
+    free = [s for s in sample.columns if s not in taken]
+    best = max(free, key=lambda s: _name_score(canonical, s), default=None)
+    if best is not None and _name_score(canonical, best) >= 0.8:
+        values = sample[best][sample[best].str.strip() != ""]
+        if canonical != CURRENCY or (not values.empty and values.str.strip().str.fullmatch(_CURRENCY_CODE).all()):
+            return Suggestion(feed, canonical, best, round(_name_score(canonical, best), 3), False,
+                              "optional; header match")
+    return Suggestion(feed, canonical, None, 0.0, False, "optional; no matching column")
+
+
 def suggest_mapping(feed: str, frame: pd.DataFrame) -> dict[str, Suggestion]:
-    """Suggest a source column for each required canonical column of `feed`.
+    """Suggest a source column for each required canonical column of `feed`, then optional ones.
 
     `frame` is the raw, all-string export. Each source column is used at most once.
     """
@@ -176,6 +193,10 @@ def suggest_mapping(feed: str, frame: pd.DataFrame) -> dict[str, Suggestion]:
         else:
             flagged, reason = False, f"header match, {kinds[source]} values"
         suggestions[c] = Suggestion(feed, c, source, confidence, flagged, reason)
+    taken = set(assigned.values())
+    for c in OPTIONAL_COLUMNS.get(feed, ()):
+        suggestions[c] = _optional(feed, c, sample, taken)
+        taken.add(suggestions[c].source)
     return suggestions
 
 
@@ -211,7 +232,8 @@ def draft_config(sources: Sources, files: dict[str, str],
             }
         else:
             suggestions[feed] = suggest_mapping(feed, raw)
-        mapping[feed] = {c: s.source for c, s in suggestions[feed].items() if not s.flagged}
+        mapping[feed] = {c: s.source for c, s in suggestions[feed].items()
+                         if s.source is not None and not s.flagged}
     base = base or RunConfig(feeds={})
     config = RunConfig(feeds=feeds, mapping=mapping, policy=base.policy,
                        resolutions=base.resolutions, ground_truth=base.ground_truth)

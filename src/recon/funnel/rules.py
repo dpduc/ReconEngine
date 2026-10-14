@@ -12,6 +12,7 @@ import pandas as pd
 
 from recon.contracts import fee
 from recon.funnel.base import FunnelContext, FunnelStep, StepOutcome, cod_remittance, split
+from recon.funnel.fx import lookup_rates
 from recon.funnel.reasons import exception
 from recon.schema import CURRENCY
 
@@ -28,6 +29,7 @@ def _measure(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     for column in ("requires_payment", "requires_shipment"):
         if column not in out:
             out[column] = True
+    _currencies(out, ctx)
     out["bank_found"] = out["txn_ref"].notna()
     out["shipment_found"] = out["tracking_code"].notna()
     out["tracking_exact"] = out["tracking_no"].fillna("").eq(out["tracking_code"].fillna(""))
@@ -47,12 +49,9 @@ def _measure(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     )
     out["fee_within_tolerance"] = _within(out["fee_delta"], policy.amount_tolerance)
     out["cod_fee_within_tolerance"] = _within(out["cod_fee_delta"], policy.amount_tolerance)
-    # Linked order and credit both carry a currency (columns suffixed on the join); compare like for like.
-    oms_ccy, bank_ccy = f"{CURRENCY}_oms", f"{CURRENCY}_bank"
-    out["currency_ok"] = True
-    if oms_ccy in out and bank_ccy in out:
-        codes = [out[c].astype("string").str.strip().str.upper() for c in (oms_ccy, bank_ccy)]
-        out["currency_ok"] = ~(codes[0].notna() & codes[1].notna() & codes[0].ne(codes[1])).fillna(False)
+    out["fx_within_tolerance"] = out["fx_converted"] & (
+        out["credit_delta"].abs() <= policy.fx.tolerance * out["expected_credit"].abs() + 1e-9
+        if policy.fx else False)
     out["timing_ok"] = True
     if "picked_at" in out and "delivered_at" in out:
         picked = ctx.dates("logistics", out["picked_at"])
@@ -61,6 +60,41 @@ def _measure(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     # A unit reaching the decision passed every check; a linked shipment must also agree on tracking number.
     out["tracking_consistent"] = ~out["shipment_found"] | out["tracking_exact"]
     return out
+
+
+def _currencies(out: pd.DataFrame, ctx: FunnelContext) -> None:
+    """Compare like for like; with FX configured, convert mismatched credits into the order currency.
+
+    Linked order and credit both carry a currency when the columns were suffixed on the join.
+    Converted units keep the original amounts and record the rate, its source and its date.
+    """
+    oms_ccy, bank_ccy = f"{CURRENCY}_oms", f"{CURRENCY}_bank"
+    fx = ctx.policy.fx
+    # Read the bank's own rate column before the fx_* outputs are initialised (it may share their name).
+    candidates = (fx.rate_column, f"{fx.rate_column}_bank") if fx and fx.rate_column else ()
+    rate_column = next((c for c in candidates if c in out), None)
+    column_rates = out[rate_column].copy() if rate_column else None
+    out["currency_ok"], out["fx_converted"], out["fx_rate_missing"] = True, False, False
+    for column in ("fx_rate", "fx_rate_source", "fx_rate_date"):
+        out[column] = float("nan") if column == "fx_rate" else None
+    if oms_ccy not in out or bank_ccy not in out:
+        return
+    order, credit = (out[c].astype("string").str.strip().str.upper() for c in (oms_ccy, bank_ccy))
+    mismatch = (order.notna() & credit.notna() & order.ne(credit)).fillna(False).astype(bool)
+    out["currency_ok"] = ~mismatch
+    if fx is None or not mismatch.any():
+        return
+    rates = lookup_rates(credit[mismatch], order[mismatch], ctx.dates("bank", out.loc[mismatch, "value_date"]),
+                         column_rates[mismatch] if column_rates is not None else None, fx.rate_column,
+                         ctx.fx_rates, fx.rate_table)
+    out.loc[mismatch, list(rates.columns)] = rates
+    found = mismatch & out["fx_rate"].notna()
+    for column in ("credit_amount", "fee_amount", "net_amount"):
+        out[f"{column}_original"] = out[column].where(found)
+        out.loc[found, column] = out.loc[found, column] * out.loc[found, "fx_rate"]
+    out["fx_converted"] = found
+    out["fx_rate_missing"] = mismatch & ~found
+    out.loc[found, "currency_ok"] = True
 
 
 def _rule(reason: str, fails: Callable[[pd.DataFrame], pd.Series]):
@@ -76,6 +110,8 @@ def _rule(reason: str, fails: Callable[[pd.DataFrame], pd.Series]):
 RULE_STEPS: list[FunnelStep] = [
     FunnelStep("missing_payment", _rule("MISSING_PAYMENT", lambda u: u["requires_payment"] & ~u["bank_found"])),
     FunnelStep("currency_mismatch", _rule("CURRENCY_MISMATCH", lambda u: u["bank_found"] & ~u["currency_ok"])),
+    FunnelStep("fx_difference", _rule("FX_DIFFERENCE", lambda u: u["bank_found"] & ~u["amount_within_tolerance"]
+                                      & u["fx_within_tolerance"])),
     FunnelStep("amount_mismatch", _rule("AMOUNT_MISMATCH", lambda u: u["bank_found"] & ~u["amount_within_tolerance"])),
     FunnelStep("missing_shipment", _rule("MISSING_SHIPMENT",
                                          lambda u: u["requires_shipment"] & ~u["shipment_found"])),

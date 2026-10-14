@@ -12,7 +12,7 @@ from recon.checks import register, warning
 from recon.checks.integrity import exclude_option
 from recon.config import RunConfig
 from recon.funnel.linking import bank_order_refs
-from recon.health import CORRECT_CURRENCY, ROUTE_TO_REVIEW, FixOption, Issue
+from recon.health import CONVERT_CURRENCY, CORRECT_CURRENCY, ROUTE_TO_REVIEW, FixOption, Issue
 from recon.schema import CURRENCY, ORDER_REF_COLUMNS, SOURCE_ROW, review_column
 
 REASON = "CURRENCY_MISMATCH"
@@ -30,6 +30,8 @@ def _rows(frame: pd.DataFrame) -> list[int]:
 def currency_mismatch(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Issue]:
     oms, bank = feeds.get("oms"), feeds.get("bank")
     order_id = ORDER_REF_COLUMNS["oms"]
+    if config.resolved_policy.fx is not None:
+        return []  # converted in the funnel; credits without a rate become CURRENCY_MISMATCH there
     if oms is None or bank is None or CURRENCY not in oms or CURRENCY not in bank or order_id not in oms:
         return []
     if not ({ORDER_REF_COLUMNS["bank"], "description"} & set(bank.columns)):
@@ -49,7 +51,8 @@ def currency_mismatch(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list
                   {"feed": "bank", "source_rows": _rows(mismatched[expected[mask].eq(code)]), "currency": code})
         for code in sorted(expected[mask].unique())
     )
-    fixes = corrections + (
+    fixes = (FixOption(CONVERT_CURRENCY, "Convert into the order currency using a rate source",
+                       {"rate_column": None, "rate_table": None, "tolerance": 0.01}),) + corrections + (
         FixOption(ROUTE_TO_REVIEW, "Route these orders to review",
                   {"feed": "bank", "source_rows": _rows(mismatched), "reason": REASON}),
         exclude_option("bank", mismatched, "Exclude these credits (they leave the reconciliation)"),

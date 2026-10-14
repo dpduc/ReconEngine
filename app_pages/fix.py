@@ -1,5 +1,6 @@
 """Fix: pick a fix option or acknowledge each open issue; choices become run-config resolutions."""
 
+from pathlib import Path
 from typing import Callable
 
 import pandas as pd
@@ -7,6 +8,7 @@ import streamlit as st
 
 from recon.pipeline import (
     ACKNOWLEDGE,
+    CONVERT_CURRENCY,
     EXCLUDE_ROWS,
     REMAP,
     SET_DATE_FORMAT,
@@ -22,8 +24,8 @@ sources, config = state.inputs()
 health = state.check_health()
 
 
-def apply(new_config) -> None:
-    state.set_inputs(sources, new_config)
+def apply(new_config, new_sources=None) -> None:
+    state.set_inputs(sources if new_sources is None else new_sources, new_config)
     st.rerun()
 
 
@@ -44,6 +46,32 @@ def date_format_params(issue, params: dict) -> bool:
     return bool(params["date_format"])
 
 
+RATE_COLUMN, RATE_TABLE = "Rate column in the bank feed", "Rate table file"
+
+
+def convert_params(issue, params: dict) -> bool:
+    """Choose the rate source: a bank column (the bank's applied rate) and/or a rate table."""
+    st.caption("A rate is order-currency units per credit-currency unit. The bank column wins where it has "
+               "a value; the table gives the latest rate on or before the credit's value date.")
+    source = st.radio("Rate source", [RATE_COLUMN, RATE_TABLE], horizontal=True, key=f"fx_source:{issue.id}")
+    if source == RATE_COLUMN:
+        params["rate_column"] = st.text_input("Bank column", key=f"fx_column:{issue.id}",
+                                              placeholder="e.g. FX Rate").strip() or None
+    elif isinstance(sources, dict):
+        table = st.file_uploader("Rate table (CSV: date, from, to, rate)", type="csv", key=f"fx_table:{issue.id}")
+        params["rate_table"] = f"fx/{table.name}" if table else None
+        params.pop("_table_bytes", None)
+        if table:
+            params["_table_bytes"] = table.getvalue()  # added to the in-memory sources on apply
+    else:
+        files = sorted(p.name for p in Path(sources).iterdir() if p.is_file() and p.suffix.lower() == ".csv")
+        params["rate_table"] = st.selectbox("Rate table in the folder (CSV: date, from, to, rate)", files,
+                                            index=None, key=f"fx_table:{issue.id}")
+    params["tolerance"] = st.number_input("FX tolerance (%)", 0.0, 10.0, 1.0, 0.1,
+                                          key=f"fx_tolerance:{issue.id}") / 100
+    return bool(params.get("rate_column") or params.get("rate_table"))
+
+
 def exclude_params(issue, params: dict) -> bool:
     st.caption(f"{len(params['source_rows']):,} row(s) of '{params['feed']}' will be excluded "
                "and listed in the run's excluded rows.")
@@ -57,6 +85,7 @@ OPTION_INPUTS: dict[str, Callable[[object, dict], bool]] = {
     REMAP: remap_params,
     SET_DATE_FORMAT: date_format_params,
     EXCLUDE_ROWS: exclude_params,
+    CONVERT_CURRENCY: convert_params,
 }
 
 
@@ -99,7 +128,9 @@ for issue in sorted(health.open_issues, key=lambda i: i.severity is not Severity
         note = st.text_input("Note" + (" (required)" if note_required else ""), key=f"note:{issue.id}")
         if st.button("Apply", key=f"apply:{issue.id}", type="primary",
                      disabled=not complete or (note_required and not note.strip())):
-            apply(resolve(config, issue.id, option.id, params, note))
+            table = params.pop("_table_bytes", None)  # an uploaded rate table joins the in-memory sources
+            apply(resolve(config, issue.id, option.id, params, note),
+                  {**sources, params["rate_table"]: table} if table is not None else None)
 
 st.subheader("Run config")
 if config.resolutions:

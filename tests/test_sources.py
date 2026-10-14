@@ -22,9 +22,9 @@ def test_folder_and_in_memory_sources_give_identical_runs(tmp_path):
     assert inspect(memory, config).to_json() == inspect(tmp_path, config).to_json()
     from_folder, from_memory = run(tmp_path, config), run(memory, config)
     assert from_memory.health.gate_open
-    lineage = ["oms_ingested_at", "bank_ingested_at", "logistics_ingested_at"]
-    pd.testing.assert_frame_equal(from_memory.results.drop(columns=lineage, errors="ignore"),
-                                  from_folder.results.drop(columns=lineage, errors="ignore"))
+    load_time = [c for c in from_folder.results if c.endswith("ingested_at")]  # differs between any two runs
+    pd.testing.assert_frame_equal(from_memory.results.drop(columns=load_time),
+                                  from_folder.results.drop(columns=load_time))
     pd.testing.assert_frame_equal(from_memory.funnel, from_folder.funnel)
     assert from_memory.manifest["input_files"] == from_folder.manifest["input_files"]
 

@@ -7,7 +7,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
-from recon.health import SET_STATUS_POLICY
+from recon.health import CONVERT_CURRENCY, SET_STATUS_POLICY
 
 # Evidence an order status can require before its unit ties out.
 PAYMENT, SHIPMENT = "payment", "shipment"
@@ -19,6 +19,24 @@ def _default_status_policy() -> dict[str, tuple[str, ...]]:
 
 
 @dataclass(frozen=True)
+class FxPolicy:
+    """How a credit in another currency than its order is converted into the order currency.
+
+    A rate is order-currency units per credit-currency unit. `rate_column` (a bank feed
+    column) wins where it has a value; otherwise `rate_table` (CSV: date, from, to, rate,
+    relative to the sources) gives the latest rate on or before the value date.
+    """
+
+    rate_column: str | None = None
+    rate_table: str | None = None
+    tolerance: float = 0.01  # relative; converted differences within it are FX_DIFFERENCE
+
+    def __post_init__(self) -> None:
+        if not (self.rate_column or self.rate_table):
+            raise ValueError("FX needs a rate source: rate_column and/or rate_table")
+
+
+@dataclass(frozen=True)
 class Policy:
     accept_threshold: float = 0.995
     mdr_bps: int = 180
@@ -27,8 +45,11 @@ class Policy:
     link_date_window_days: int = 4  # linking pass 2: |value_date - order date| allowed
     # order status -> the EVIDENCE it requires; unlisted statuses are pending policy
     status_policy: dict[str, tuple[str, ...]] = field(default_factory=_default_status_policy)
+    fx: FxPolicy | None = None  # None: credits in another currency than their order are not compared
 
     def __post_init__(self) -> None:
+        if isinstance(self.fx, dict):
+            object.__setattr__(self, "fx", FxPolicy(**self.fx))
         unknown = {e for required in self.status_policy.values() for e in required} - set(EVIDENCE)
         if unknown:
             raise ValueError(f"unknown evidence in status_policy: {sorted(unknown)}")
@@ -70,12 +91,17 @@ class RunConfig:
 
     @property
     def resolved_policy(self) -> Policy:
-        """`policy` with the status evidence that `set_status_policy` resolutions chose."""
+        """`policy` with the status evidence and FX setting that resolutions chose (the last FX one wins)."""
+        policy = self.policy
         chosen = {r.params["status"]: tuple(r.params["evidence"])
                   for r in self.resolutions if r.option == SET_STATUS_POLICY}
-        if not chosen:
-            return self.policy
-        return replace(self.policy, status_policy={**self.policy.status_policy, **chosen})
+        if chosen:
+            policy = replace(policy, status_policy={**policy.status_policy, **chosen})
+        fx = [r.params for r in self.resolutions if r.option == CONVERT_CURRENCY]
+        if fx:
+            policy = replace(policy, fx=FxPolicy(**{k: fx[-1].get(k) for k in ("rate_column", "rate_table")},
+                                                 tolerance=float(fx[-1].get("tolerance", 0.01))))
+        return policy
 
     def date_format(self, feed: str) -> str | None:
         """The feed's declared strftime date format, if any."""
