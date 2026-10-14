@@ -101,11 +101,12 @@ def test_draft_config_suggests_the_mapping_for_renamed_columns(tmp_path):
                                      "Credit", "Charges", "Net Settled")
     assert draft.config.mapping == {
         "oms": {"order_id": "Order Ref", "tracking_no": "AWB", "payment_method": "Pay Method",
-                "order_amount": "Total (BRL)", "ordered_at": "Order Date"},
+                "order_amount": "Total (BRL)", "ordered_at": "Order Date", "currency": "Ccy"},
         "bank": {"txn_ref": "Bank Ref", "description": "Narrative", "credit_amount": "Credit",
-                 "fee_amount": "Charges", "net_amount": "Net Settled", "value_date": "Value Dt"},
+                 "fee_amount": "Charges", "net_amount": "Net Settled", "value_date": "Value Dt",
+                 "currency": "Ccy"},
         "logistics": {"tracking_code": "Waybill", "client_order_code": "Merchant Order",
-                      "cod_collected": "COD", "ship_fee": "Freight", "cod_fee": "COD Fee"},
+                      "cod_collected": "COD", "ship_fee": "Freight", "cod_fee": "COD Fee", "currency": "Ccy"},
     }
     assert inspect(tmp_path, draft.config).gate_open
 
@@ -119,7 +120,7 @@ def test_ambiguous_columns_are_flagged_and_never_applied(tmp_path):
     money = {"credit_amount", "fee_amount", "net_amount"}
     assert {(s.feed, s.canonical) for s in draft.flagged} == {("bank", c) for c in money}
     assert draft.config.mapping["bank"] == {"txn_ref": "Bank Ref", "description": "Narrative",
-                                            "value_date": "Value Dt"}
+                                            "value_date": "Value Dt", "currency": "Ccy"}
     report = inspect(tmp_path, draft.config)
     assert {i.id for i in report.blocking_issues} == {f"missing_column:bank:{c}" for c in money}
     remap = report.blocking_issues[0].fix_options[0]
@@ -154,3 +155,16 @@ def test_saved_profile_reloads_and_produces_the_same_mapping(tmp_path):
     assert redraft.config.mapping["bank"] == confirmed
     assert redraft.flagged == []
     assert inspect(tmp_path, redraft.config).gate_open
+
+
+def test_optional_currency_column_is_suggested_but_never_flagged(tmp_path):
+    _write_renamed(tmp_path)
+    draft = draft_config(tmp_path, RENAMED_FILES)
+    assert {feed: cols.get("currency") for feed, cols in draft.config.mapping.items()} == \
+        {"oms": "Ccy", "bank": "Ccy", "logistics": "Ccy"}
+
+    no_ccy = RENAMED_BANK.replace("Narrative,Ccy,", "Narrative,").replace(",BRL,", ",")
+    _write_renamed(tmp_path, bank=no_ccy)
+    draft = draft_config(tmp_path, RENAMED_FILES)
+    assert "currency" not in draft.config.mapping["bank"]
+    assert draft.flagged == []

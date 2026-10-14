@@ -1,45 +1,75 @@
-"""Load: upload one export per feed, review the suggested mapping, confirm or override it."""
+"""Load: pick one export per feed, review the suggested mapping, confirm or override it.
 
-import tempfile
+Uploads stay in memory; a local folder is read in place. Neither writes copies to disk.
+"""
+
+import json
 from dataclasses import asdict, replace
 from pathlib import Path
 
 import streamlit as st
 
-from recon.pipeline import FEED_LABELS, FILE_EXTENSIONS, MappingProfile, load_profile, save_profile
+from recon.pipeline import FEED_LABELS, FILE_EXTENSIONS, MappingProfile
 from recon_app import state
 
 TYPES = [extension.lstrip(".") for extension in FILE_EXTENSIONS]
 UNMAPPED = "(not mapped)"
+UPLOAD, FOLDER = "Upload files", "Local folder"
+
+
+def pick_uploads() -> tuple[dict[str, bytes], dict[str, str]] | None:
+    columns = st.columns(len(FEED_LABELS))
+    uploads = {feed: column.file_uploader(label, type=TYPES, key=f"upload_{feed}")
+               for column, (feed, label) in zip(columns, FEED_LABELS.items())}
+    if not all(uploads.values()):
+        return None
+    return state.upload_sources(uploads)
+
+
+def pick_folder() -> tuple[str, dict[str, str]] | None:
+    st.caption("Reads the files where they are, without copying them. "
+               "Works only while the app runs on the machine that holds the folder.")
+    folder = st.text_input("Folder", placeholder=r"e.g. C:\exports\2026-10", key="local_folder").strip().strip('"')
+    if not folder:
+        return None
+    path = Path(folder)
+    if not path.is_dir():
+        st.error(f"Not a folder: {folder}")
+        return None
+    names = sorted(p.name for p in path.iterdir() if p.is_file() and p.suffix.lower() in FILE_EXTENSIONS)
+    if not names:
+        st.warning(f"No {', '.join(TYPES)} files in {folder}.")
+        return None
+    columns = st.columns(len(FEED_LABELS))
+    files = {feed: column.selectbox(label, names, index=None, key=f"folder_{feed}")
+             for column, (feed, label) in zip(columns, FEED_LABELS.items())}
+    if not all(files.values()):
+        return None
+    return str(path), files
+
 
 st.title("Load")
-st.caption("Upload the three exports as they come out of each system; nothing is changed in the files.")
+st.caption("Pick the three exports as they come out of each system; nothing is changed in the files.")
 
-columns = st.columns(len(FEED_LABELS))
-uploads = {feed: column.file_uploader(label, type=TYPES, key=f"upload_{feed}")
-           for column, (feed, label) in zip(columns, FEED_LABELS.items())}
+mode = st.segmented_control("Source", [UPLOAD, FOLDER], default=UPLOAD, key="load_mode") or UPLOAD
+picked = pick_uploads() if mode == UPLOAD else pick_folder()
 profile_uploads = st.file_uploader(
     "Mapping profiles (optional)", type="json", accept_multiple_files=True, key="upload_profiles",
-    help="Profiles saved from an earlier upload; a profile whose columns are all present is reused as-is.")
+    help="Profiles saved from an earlier load; a profile whose columns are all present is reused as-is.")
 
-if not all(uploads.values()):
+if picked is None:
     if state.is_benchmark():
-        st.info("Using the bundled Olist benchmark. Upload all three exports to reconcile your own data.")
+        st.info("Using the bundled Olist benchmark. Pick all three exports to reconcile your own data.")
     else:
-        st.info(f"Using the inputs in {state.inputs()[0]}. Upload all three exports to replace them.")
+        st.info(f"Using {state.describe_inputs()}. Pick all three exports to replace them.")
         st.button("Use the bundled benchmark", icon=":material/restart_alt:", on_click=state.use_benchmark)
     st.page_link("app_pages/health.py", label="Check health", icon=":material/arrow_forward:")
     st.stop()
 
-sources, files = state.stage_uploads({feed: (u.name, u.getvalue()) for feed, u in uploads.items()})
-profiles = []
-for upload in profile_uploads or []:
-    with tempfile.TemporaryDirectory() as tmp:
-        path = Path(tmp) / "profile.json"
-        path.write_bytes(upload.getvalue())
-        profiles.append(asdict(load_profile(path)))
+sources, files = picked
+profiles = [asdict(MappingProfile(**json.loads(upload.getvalue()))) for upload in profile_uploads or []]
 draft = state.draft(sources, files, profiles)
-key = Path(sources).name  # widget keys follow the uploaded content
+key = state.sources_key(sources)  # widget keys follow the picked content
 
 st.subheader("Mapping")
 st.caption("Each required column is mapped to a source column. Flagged suggestions are left unmapped: "
@@ -64,7 +94,7 @@ for feed, label in FEED_LABELS.items():
 
 if st.button("Confirm mapping", key="confirm_mapping", type="primary", icon=":material/check:"):
     state.set_inputs(sources, replace(draft.config, mapping=mapping))
-if state.inputs()[0] == sources:
+if state.sources_key(state.inputs()[0]) == key:
     st.success("Mapping confirmed. Inspect the feeds next.")
     st.page_link("app_pages/health.py", label="Check health", icon=":material/arrow_forward:")
 
@@ -73,10 +103,7 @@ with st.expander("Save mapping profiles", icon=":material/save:"):
     system = st.text_input("Source system", placeholder="e.g. acme-bank", key="profile_system")
     with st.container(horizontal=True):
         for feed, label in FEED_LABELS.items():
-            with tempfile.TemporaryDirectory() as tmp:
-                path = Path(tmp) / "profile.json"
-                save_profile(MappingProfile(system.strip() or feed, feed, mapping[feed]), path)
-                content = path.read_text(encoding="utf-8")
-            st.download_button(f"{label} profile", content, f"{system.strip() or 'profile'}_{feed}.json",
-                               "application/json", disabled=not system.strip(), key=f"profile_{feed}",
-                               icon=":material/download:")
+            profile = MappingProfile(system.strip() or feed, feed, mapping[feed])
+            st.download_button(f"{label} profile", json.dumps(asdict(profile), indent=2, sort_keys=True),
+                               f"{system.strip() or 'profile'}_{feed}.json", "application/json",
+                               disabled=not system.strip(), key=f"profile_{feed}", icon=":material/download:")

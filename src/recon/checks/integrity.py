@@ -1,4 +1,4 @@
-"""Blocking integrity checks: duplicate keys, unparseable dates, mixed currencies."""
+"""Blocking integrity checks: duplicate keys, unparseable values and dates."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from recon.checks import register, register_raw, sample
 from recon.config import RunConfig
 from recon.health import DUPLICATE_STRATEGY, EXCLUDE_ROWS, SET_DATE_FORMAT, FixOption, Issue, Severity
 from recon.ingest import parse_dates
-from recon.schema import CURRENCY, DATE_COLUMNS, NUMERIC_COLUMNS, PRIMARY_KEYS, SOURCE_ROW, review_column
+from recon.schema import DATE_COLUMNS, NUMERIC_COLUMNS, PRIMARY_KEYS, SOURCE_ROW, review_column
 
 
 def sample_rows(frame: pd.DataFrame, columns: list[str]) -> tuple[dict, ...]:
@@ -72,33 +72,6 @@ def unparseable_date(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[
                                {"feed": feed, "date_format": candidates[0] if candidates else None,
                                 "candidates": candidates})
             issues.append(_parse_issue(feed, column, bad, "unparseable_date", "dates", (option,)))
-    return issues
-
-
-@register
-def mixed_currency(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Issue]:
-    """Amounts in one feed must share one currency; nothing is converted."""
-    issues = []
-    for feed, frame in feeds.items():
-        if CURRENCY not in frame:
-            continue
-        codes = frame[CURRENCY].str.strip().str.upper()
-        counts = codes.value_counts()
-        if len(counts) < 2:
-            continue
-        rows_not_in = {keep: frame[codes.notna() & codes.ne(keep)] for keep in counts.index}  # currency -> other rows
-        issues.append(Issue(
-            id=f"mixed_currency:{feed}",
-            check="mixed_currency",
-            severity=Severity.BLOCKING,
-            feed=feed,
-            affected_rows=int(counts.iloc[1:].sum()),
-            message=f"{feed}: amounts in several currencies ({', '.join(f'{c}: {n}' for c, n in counts.items())});"
-                    " currencies are not converted",
-            sample_rows=sample_rows(rows_not_in[counts.index[0]], [CURRENCY]),
-            fix_options=tuple(exclude_option(feed, rows_not_in[keep], f"Keep only {keep}, exclude the other rows")
-                              for keep in counts.index),
-        ))
     return issues
 
 

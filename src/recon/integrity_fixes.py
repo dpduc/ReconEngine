@@ -9,9 +9,10 @@ import pandas as pd
 
 from recon.ingest import parse_dates
 from recon.config import Resolution, RunConfig
-from recon.health import DUPLICATE_STRATEGY, EXCLUDE_ROWS, SET_DATE_FORMAT
+from recon.health import CORRECT_CURRENCY, DUPLICATE_STRATEGY, EXCLUDE_ROWS, ROUTE_TO_REVIEW, SET_DATE_FORMAT
 from recon.resolutions import HANDLERS, Feeds
 from recon.schema import (
+    CURRENCY,
     DATE_COLUMNS,
     EXCLUDED_BY,
     EXCLUSION_REASON,
@@ -89,7 +90,28 @@ def set_date_format(feeds: Feeds, resolution: Resolution, config: RunConfig) -> 
     return _with_frame(feeds, feed, frame)
 
 
+def correct_currency(feeds: Feeds, resolution: Resolution, config: RunConfig) -> Feeds:
+    """params: feed, source_rows, currency. Relabels those rows' currency code; amounts are unchanged."""
+    feed = resolution.params["feed"]
+    frame = feeds[feed].copy()
+    frame.loc[frame[SOURCE_ROW].isin(resolution.params["source_rows"]), CURRENCY] = resolution.params["currency"]
+    return _with_frame(feeds, feed, frame)
+
+
+def route_to_review(feeds: Feeds, resolution: Resolution, config: RunConfig) -> Feeds:
+    """params: feed, source_rows, reason. Units carrying those rows go to REVIEW with `reason`."""
+    feed = resolution.params["feed"]
+    frame = feeds[feed].copy()
+    column = review_column(feed)
+    if column not in frame:
+        frame[column] = pd.Series(pd.NA, index=frame.index, dtype=object)
+    frame.loc[frame[SOURCE_ROW].isin(resolution.params["source_rows"]), column] = resolution.params["reason"]
+    return _with_frame(feeds, feed, frame)
+
+
 HANDLERS.update({
+    CORRECT_CURRENCY: correct_currency,
+    ROUTE_TO_REVIEW: route_to_review,
     EXCLUDE_ROWS: exclude_rows,
     DUPLICATE_STRATEGY: duplicate_strategy,
     SET_DATE_FORMAT: set_date_format,

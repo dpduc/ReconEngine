@@ -5,23 +5,38 @@ Everything a shell needs (config types, fix-option ids, schema names) is re-expo
 
 from __future__ import annotations
 
+import io
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pandas as pd
 
 from recon.acknowledgement import acknowledge_warnings, acknowledgements
 from recon.checks import run_checks, run_raw_checks
-from recon.config import EVIDENCE, PAYMENT, SHIPMENT, FeedSpec, Policy, Resolution, RunConfig, load_config, save_config
+from recon.config import (
+    EVIDENCE,
+    PAYMENT,
+    SHIPMENT,
+    FeedSpec,
+    FxPolicy,
+    Policy,
+    Resolution,
+    RunConfig,
+    load_config,
+    save_config,
+)
 from recon.evaluation import attach_truth, metrics
 from recon.funnel import RULE_VERSION, STEPS, FunnelContext, build_units, run_funnel
+from recon.funnel.fx import read_rate_table
 from recon.funnel.orphans import orphan_counts, reverse_pass
 from recon.health import (
     ACKNOWLEDGE,
+    CONVERT_CURRENCY,
+    CORRECT_CURRENCY,
     DUPLICATE_STRATEGY,
     EXCLUDE_ROWS,
     REMAP,
+    ROUTE_TO_REVIEW,
     SET_DATE_FORMAT,
     SET_STATUS_POLICY,
     FixOption,
@@ -29,7 +44,7 @@ from recon.health import (
     Issue,
     Severity,
 )
-from recon.ingest import LoadedFeed, file_sha256, load_feed, parse_numeric
+from recon.ingest import LoadedFeed, Sources, describe_sources, load_feed, parse_numeric, read_source, sha256
 from recon.mapping import (
     DraftConfig,
     MappingProfile,
@@ -58,12 +73,14 @@ from recon.schema import (
 )
 
 __all__ = [
-    "inspect", "run",
+    "inspect", "run", "Sources", "describe_sources",
     # config
-    "RunConfig", "FeedSpec", "Policy", "Resolution", "load_config", "save_config", "EVIDENCE", "PAYMENT", "SHIPMENT",
+    "RunConfig", "FeedSpec", "Policy", "FxPolicy", "Resolution", "load_config", "save_config",
+    "EVIDENCE", "PAYMENT", "SHIPMENT",
     # health and fixes
     "HealthReport", "Issue", "FixOption", "Severity", "resolve", "undo", "acknowledge_warnings",
     "ACKNOWLEDGE", "REMAP", "EXCLUDE_ROWS", "DUPLICATE_STRATEGY", "SET_DATE_FORMAT", "SET_STATUS_POLICY",
+    "CORRECT_CURRENCY", "ROUTE_TO_REVIEW", "CONVERT_CURRENCY",
     # mapping
     "DraftConfig", "MappingProfile", "Suggestion", "draft_config", "suggest_mapping", "load_profile", "save_profile",
     # results and schema
@@ -96,7 +113,7 @@ def _split_excluded(feeds: dict[str, pd.DataFrame]) -> tuple[dict[str, pd.DataFr
     return kept, table.reindex(columns=list(EXCLUDED_COLUMNS))
 
 
-def _prepare(sources: str | Path, config: RunConfig) -> _Prepared:
+def _prepare(sources: Sources, config: RunConfig) -> _Prepared:
     ingested_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     inputs = {
         name: load_feed(name, sources, spec, config.mapping.get(name, {}), ingested_at)
@@ -111,30 +128,36 @@ def _prepare(sources: str | Path, config: RunConfig) -> _Prepared:
     return _Prepared(inputs, feeds, report, excluded)
 
 
-def inspect(sources: str | Path, config: RunConfig) -> HealthReport:
+def inspect(sources: Sources, config: RunConfig) -> HealthReport:
     """Load, map, normalize and check the feeds declared in `config`.
 
-    `sources` is the folder that feed paths in the config are relative to.
+    `sources` is the folder that feed paths in the config are relative to, or the files
+    themselves held in memory as `{relative path: bytes}`.
     """
     return _prepare(sources, config).report
 
 
-def run(sources: str | Path, config: RunConfig) -> ReconRun:
+def run(sources: Sources, config: RunConfig) -> ReconRun:
     """Re-inspect; refuse with a blocked run while the gate is closed, else run the funnel."""
     prepared = _prepare(sources, config)
     if not prepared.report.gate_open:
         return ReconRun(status=BLOCKED, health=prepared.report, excluded=prepared.excluded)
-    ctx = FunnelContext(feeds=prepared.feeds, policy=config.resolved_policy,
-                        date_formats={feed: config.date_format(feed) for feed in config.feeds})
+    policy = config.resolved_policy
+    rate_table = read_source(sources, policy.fx.rate_table) if policy.fx and policy.fx.rate_table else None
+    ctx = FunnelContext(feeds=prepared.feeds, policy=policy,
+                        date_formats={feed: config.date_format(feed) for feed in config.feeds},
+                        fx_rates=read_rate_table(rate_table) if rate_table is not None else None)
     results, funnel_counts = run_funnel(build_units(prepared.feeds), STEPS, ctx)
     orphans, reverse_counts = reverse_pass(results, prepared.feeds)
     funnel_counts = pd.concat([funnel_counts, pd.DataFrame([reverse_counts])], ignore_index=True)
     input_files = {name: {"path": config.feeds[name].path, "sha256": loaded.sha256}
                    for name, loaded in prepared.inputs.items()}
+    if rate_table is not None:
+        input_files["fx_rates"] = {"path": policy.fx.rate_table, "sha256": sha256(rate_table)}
     if config.ground_truth:
-        truth_path = Path(sources) / config.ground_truth
-        results = attach_truth(results, pd.read_csv(truth_path))
-        input_files["ground_truth"] = {"path": config.ground_truth, "sha256": file_sha256(truth_path)}
+        truth = read_source(sources, config.ground_truth)
+        results = attach_truth(results, pd.read_csv(io.BytesIO(truth)))
+        input_files["ground_truth"] = {"path": config.ground_truth, "sha256": sha256(truth)}
     manifest = {
         "rule_version": RULE_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

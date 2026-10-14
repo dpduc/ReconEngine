@@ -40,7 +40,7 @@ streamlit run app.py
 
 | Step | What happens |
 |---|---|
-| **Load** | Upload the OMS, bank and logistics files (CSV, XLSX or Parquet). The engine suggests a column mapping from column names and value patterns, and flags any suggestion it isn't sure of; nothing is mapped silently. A confirmed mapping can be saved as a profile and reused. |
+| **Load** | Upload the OMS, bank and logistics files (CSV, XLSX or Parquet), or point at a **local folder** and pick a file for each feed. Uploads stay in memory and folder files are read in place, so no copies are written to disk. Local-folder mode only works when the app runs on the machine that holds the folder. The engine suggests a column mapping from column names and value patterns, and flags any suggestion it isn't sure of; nothing is mapped silently. An optional currency column (e.g. `Ccy`) is suggested when its header and values clearly match. A confirmed mapping can be saved as a profile and reused. |
 | **Health** | The Health Report groups issues by severity (blocking / warning / info), with affected-row counts, sample rows and profiles. It can be downloaded as JSON or as a standalone HTML page. |
 | **Fix** | Pick a fix option for each issue, or acknowledge a warning with a note. Each choice is written into the run config and the checks run again. The run config can be downloaded. |
 | **Run** | Available only once the gate is open. Runs the funnel and shows the counts at each step. |
@@ -63,6 +63,7 @@ config = draft.config            # draft.flagged lists the mapping suggestions t
 # ...or load a saved run config
 config = load_config("configs/olist_benchmark.json")
 
+# sources: a folder, or the files themselves in memory as {relative path: bytes}
 report = inspect("data/generated", config)   # HealthReport: issues, profiles, gate_open
 outcome = run("data/generated", config)      # ReconRun, or a "blocked" run listing the open issues
 outcome.results          # one row per unit: deciding step, decision, reason codes, deltas, explanation
@@ -76,21 +77,66 @@ A run config is a JSON file (or YAML, if PyYAML is installed) with these parts:
 
 - `feeds`: path, format, encoding, date format and delimiter for each feed.
 - `mapping`: canonical column → source column, for each feed.
-- `policy`: absolute amount tolerance (default 0.01), date window for linking (default ±4 days), fee rates, and a `status_policy` that says which order statuses need payment and/or shipment evidence.
+- `policy`: absolute amount tolerance (default 0.01), date window for linking (default ±4 days), fee rates, a `status_policy` that says which order statuses need payment and/or shipment evidence, and an optional `fx` setting (see [Currencies and FX](#currencies-and-fx)).
 - `resolutions`: the fixes and acknowledgements recorded in the Fix step.
 - `ground_truth`: optional. When set, precision and recall are reported for each reason code.
 
 `configs/olist_benchmark.json` is the config for the benchmark, with every warning acknowledged.
 
+### Mapping profiles
+
+A mapping profile is a small JSON file. It records which column in one source system's export holds each canonical field the engine expects, for one feed. Keep one file per source system and feed.
+
+1. On the first upload from a system, the engine suggests a mapping. You confirm or correct it on the Load page.
+2. Under **Save mapping profiles**, give the source system a name and download one profile per feed.
+3. On later runs, upload the profile with the new export, in the **Mapping profiles (optional)** box or through `draft_config(..., profiles=[...])`. If every column the profile names exists in the file, the mapping is reused exactly as saved, with no suggestions and nothing flagged. If any column is missing or renamed, the profile is skipped and the engine goes back to suggesting.
+
+```json
+{
+  "source_system": "acme-bank",
+  "feed": "bank",
+  "mapping": {
+    "txn_ref":       "Transaction ID",
+    "description":   "Narrative",
+    "credit_amount": "Credit (BRL)",
+    "fee_amount":    "Charges",
+    "net_amount":    "Net Credited",
+    "value_date":    "Value Dt"
+  }
+}
+```
+
+A profile answers:
+
+- **Which column is which?** For example, is the gross credit "Credit (BRL)" or "Net Credited"? A suggestion can pick the wrong one when two columns look alike; a profile settles it.
+- **Has the export format changed?** If the bank renames "Charges" to "Fees", the profile stops matching. The engine falls back to suggesting and flags anything it's unsure of, so the change can't produce a wrong mapping without you noticing.
+- **Is this run mapped the same way as the last one?** Reusing the profile keeps runs from the same system comparable.
+- **Where did a mapping come from?** The source-system name shows up as the reason for each mapped column (for example "profile 'acme-bank'").
+
+A profile stores column names only. Date format, delimiter and encoding stay in the run config's `feeds`.
+
 ## Health checks
 
 | Severity | Checks | Fix options |
 |---|---|---|
-| Blocking | missing required column, values that fail type or date parsing, duplicate primary keys, mixed currencies within a feed | remap a column, set the date format, choose a duplicate strategy (keep first / keep latest / route to review), exclude rows with a reason |
-| Warning | missing or zero amounts, coverage gaps, picked up after delivered, placeholder 00:00:00 timestamps, amount outliers, order statuses not covered by the status policy | acknowledge with a note, or set the status policy |
-| Info | amount distributions, order-status mix, txn → value-date lag percentiles | none |
+| Blocking | missing required column, values that fail type or date parsing, duplicate primary keys | remap a column, set the date format, choose a duplicate strategy (keep first / keep latest / route to review), exclude rows with a reason |
+| Warning | missing or zero amounts, coverage gaps, picked up after delivered, placeholder 00:00:00 timestamps, amount outliers, order statuses not covered by the status policy, bank credits in another currency than their order | acknowledge with a note, set the status policy; for currency mismatches: convert using a rate source, correct the currency code, route to review, or exclude as a last resort |
+| Info | amount distributions, order-status mix, currency mix per feed, txn → value-date lag percentiles | none |
 
 Excluded rows are never dropped silently. They are reported in the run as a separate category, with their reason.
+
+### Currencies and FX
+
+A feed may mix currencies. Each linked order and credit are compared in their own currency. A credit whose currency differs from its order's is never compared as if it were the same currency.
+
+- **Without FX configured** the unit is `CURRENCY_MISMATCH`.
+- **With FX configured** (the "convert using a rate source" fix), the credit is converted into the order currency. The rate source is the bank's own rate column where it has a value, otherwise a rate table (CSV: `date, from, to, rate`) giving the latest rate on or before the credit's value date. A rate is order-currency units per credit-currency unit, and a table quoting only the inverse pair works too.
+  - Within the amount tolerance after conversion: ties out as usual.
+  - Within the FX tolerance (default 1%): `FX_DIFFERENCE`, a low-priority exception kept apart from amount errors.
+  - Beyond it: `AMOUNT_MISMATCH`.
+  - No rate for the date: `CURRENCY_MISMATCH`, with an explanation saying the rate is missing.
+
+Each converted unit records the rate, its source and its date in its results and explanation, and keeps the original amounts. The manifest records the FX setting and the rate table's hash.
 
 ## The funnel
 
@@ -107,7 +153,7 @@ missing shipments.
 | 4 | `link_constrained` | links on same currency, amount within tolerance and date within the window. Never auto-matches when several candidates qualify |
 | 5 | `link_candidates` | REVIEW with `LINK_CANDIDATES`: proposes candidates with a confidence score, never auto-accepted |
 | 6 | `route_review` | REVIEW: duplicate keys whose strategy is "route to review" |
-| 7 | rule checks | `MISSING_PAYMENT` → `AMOUNT_MISMATCH` → `MISSING_SHIPMENT` → fee / COD fee → `TIMING_MISMATCH` |
+| 7 | rule checks | `MISSING_PAYMENT` → `CURRENCY_MISMATCH` → `FX_DIFFERENCE` → `AMOUNT_MISMATCH` → `MISSING_SHIPMENT` → fee / COD fee → `TIMING_MISMATCH` |
 | 8 | `decision` | `AUTO_ACCEPT` |
 | 9 | `reverse_pass` | `ORPHAN_PAYMENT` / `ORPHAN_SHIPMENT`: bank or 3PL records that link to no order |
 
@@ -185,5 +231,5 @@ tests of the wizard. The benchmark tests need `data/generated/`; see Quick start
 
 - **Exception resolution actions:** force match, write-off and refund, with an audit log.
 - **Infrastructure:** PostgreSQL sources, and dedup across repeated ingests of the same file.
-- **Matching beyond one-to-one:** currency conversion, and many-to-many matching (split payments, batched remittances).
+- **Matching beyond one-to-one:** many-to-many matching (split payments, batched remittances).
 - **Packaging:** Docker.
