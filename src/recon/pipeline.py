@@ -6,6 +6,7 @@ Everything a shell needs (config types, fix-option ids, schema names) is re-expo
 from __future__ import annotations
 
 import io
+import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -72,6 +73,7 @@ from recon.schema import (
     SOURCE_FILE,
     SOURCE_ROW,
 )
+from recon.timing import StageTimer, nothing, peak_rss_bytes
 
 __all__ = [
     "inspect", "run", "Sources", "describe_sources",
@@ -114,18 +116,26 @@ def _split_excluded(feeds: dict[str, pd.DataFrame]) -> tuple[dict[str, pd.DataFr
     return kept, table.reindex(columns=list(EXCLUDED_COLUMNS))
 
 
-def _prepare(sources: Sources, config: RunConfig) -> _Prepared:
+def _prepare(sources: Sources, config: RunConfig, timer: StageTimer | None = None) -> _Prepared:
+    stage = timer.stage if timer else (lambda name: nothing())
     ingested_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
-    inputs = {
-        name: load_feed(name, sources, spec, config.mapping.get(name, {}), ingested_at)
-        for name, spec in config.feeds.items()
-    }
-    feeds = apply_resolutions({name: loaded.frame for name, loaded in inputs.items()}, config)
-    feeds, excluded = _split_excluded(feeds)
-    raw_issues = run_raw_checks(feeds, config)
-    feeds = {name: parse_numeric(name, frame) for name, frame in feeds.items()}
-    report = HealthReport(issues=tuple(raw_issues + run_checks(feeds, config)),
-                          profiles=run_profiles(feeds, config), acknowledged=acknowledgements(config))
+    with stage("load"):
+        inputs = {
+            name: load_feed(name, sources, spec, config.mapping.get(name, {}), ingested_at)
+            for name, spec in config.feeds.items()
+        }
+    with stage("resolutions"):
+        feeds = apply_resolutions({name: loaded.frame for name, loaded in inputs.items()}, config)
+        feeds, excluded = _split_excluded(feeds)
+    with stage("raw_checks"):
+        raw_issues = run_raw_checks(feeds, config)
+    with stage("parse_numeric"):
+        feeds = {name: parse_numeric(name, frame) for name, frame in feeds.items()}
+    with stage("checks"):
+        issues = run_checks(feeds, config)
+    with stage("profiles"):
+        profiles = run_profiles(feeds, config)
+    report = HealthReport(issues=tuple(raw_issues + issues), profiles=profiles, acknowledged=acknowledgements(config))
     return _Prepared(inputs, feeds, report, excluded)
 
 
@@ -140,7 +150,8 @@ def inspect(sources: Sources, config: RunConfig) -> HealthReport:
 
 def run(sources: Sources, config: RunConfig) -> ReconRun:
     """Re-inspect; refuse with a blocked run while the gate is closed, else run the funnel."""
-    prepared = _prepare(sources, config)
+    timer, started, cpu_started = StageTimer(), time.perf_counter(), time.process_time()
+    prepared = _prepare(sources, config, timer)
     if not prepared.report.gate_open:
         return ReconRun(status=BLOCKED, health=prepared.report, excluded=prepared.excluded)
     policy = config.resolved_policy
@@ -148,16 +159,20 @@ def run(sources: Sources, config: RunConfig) -> ReconRun:
     ctx = FunnelContext(feeds=prepared.feeds, policy=policy,
                         date_formats={feed: config.date_format(feed) for feed in config.feeds},
                         fx_rates=read_rate_table(rate_table) if rate_table is not None else None)
-    results, funnel_counts = run_funnel(build_units(prepared.feeds), STEPS, ctx)
-    orphans, reverse_counts = reverse_pass(results, prepared.feeds)
+    with timer.stage("build_units"):
+        units = build_units(prepared.feeds)
+    results, funnel_counts = run_funnel(units, STEPS, ctx, timer)
+    with timer.stage("reverse_pass"):
+        orphans, reverse_counts = reverse_pass(results, prepared.feeds)
     funnel_counts = pd.concat([funnel_counts, pd.DataFrame([reverse_counts])], ignore_index=True)
     input_files = {name: {"path": config.feeds[name].path, "sha256": loaded.sha256}
                    for name, loaded in prepared.inputs.items()}
     if rate_table is not None:
         input_files["fx_rates"] = {"path": policy.fx.rate_table, "sha256": sha256(rate_table)}
     if config.ground_truth:
-        truth = read_source(sources, config.ground_truth)
-        results = attach_truth(results, pd.read_csv(io.BytesIO(truth)))
+        with timer.stage("ground_truth"):
+            truth = read_source(sources, config.ground_truth)
+            results = attach_truth(results, pd.read_csv(io.BytesIO(truth)))
         input_files["ground_truth"] = {"path": config.ground_truth, "sha256": sha256(truth)}
     manifest = {
         "rule_version": RULE_VERSION,
@@ -167,6 +182,14 @@ def run(sources: Sources, config: RunConfig) -> ReconRun:
         "metrics": {**metrics(results), "orphans": orphan_counts(orphans),
                     "close_watchlist": watchlist_summary(results)},
         "excluded_rows": {k: int(v) for k, v in prepared.excluded["feed"].value_counts().items()},
+    }
+    manifest["performance"] = {
+        "units": int(len(results)),
+        "input_bytes": int(sum(loaded.size for loaded in prepared.inputs.values())),
+        "total_seconds": round(time.perf_counter() - started, 6),
+        "cpu_seconds": round(time.process_time() - cpu_started, 6),
+        "peak_rss_bytes": peak_rss_bytes(),
+        "stages": {name: round(seconds, 6) for name, seconds in timer.stages.items()},
     }
     return ReconRun(status=COMPLETED, health=prepared.report, results=results,
                     funnel=funnel_counts, manifest=manifest, feeds=prepared.feeds, orphans=orphans,

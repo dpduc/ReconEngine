@@ -125,7 +125,8 @@ def test_same_sources_and_config_give_identical_runs(tmp_path):
     first, second = run(tmp_path, config), run(tmp_path, config)
     pd.testing.assert_frame_equal(first.results, second.results)
     pd.testing.assert_frame_equal(first.funnel, second.funnel)
-    strip = lambda m: {k: v for k, v in m.items() if k != "created_at"}
+    # When it ran and how long it took differ by nature; everything else must match.
+    strip = lambda m: {k: v for k, v in m.items() if k not in {"created_at", "performance"}}
     assert strip(first.manifest) == strip(second.manifest)
 
 
