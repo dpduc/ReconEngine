@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import replace
 
 from recon.config import Resolution, RunConfig
@@ -13,11 +14,13 @@ def acknowledgements(config: RunConfig) -> dict[str, str]:
     return {r.issue_id: r.note for r in config.resolutions if r.option == ACKNOWLEDGE and r.note.strip()}
 
 
-def acknowledge_warnings(config: RunConfig, report: HealthReport, note: str) -> RunConfig:
-    """`config` plus an acknowledgement for every still-open warning in `report`."""
+def acknowledge_warnings(config: RunConfig, report: HealthReport, note: str,
+                         issue_ids: Collection[str] | None = None) -> RunConfig:
+    """`config` plus an acknowledgement for every still-open warning in `report` (or only those in `issue_ids`)."""
     if not note.strip():
         raise ValueError("an acknowledgement needs a note")
     done = acknowledgements(config)
     new = tuple(Resolution(issue.id, ACKNOWLEDGE, note=note)
-                for issue in report.by_severity(Severity.WARNING) if issue.id not in done)
+                for issue in report.by_severity(Severity.WARNING)
+                if issue.id not in done and (issue_ids is None or issue.id in issue_ids))
     return replace(config, resolutions=config.resolutions + new)

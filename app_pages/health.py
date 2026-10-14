@@ -3,7 +3,7 @@
 import pandas as pd
 import streamlit as st
 
-from recon.pipeline import Severity
+from recon.pipeline import Severity, guide
 from recon_app import state
 
 ICONS = {Severity.BLOCKING: ":material/block:", Severity.WARNING: ":material/warning:",
@@ -37,6 +37,11 @@ for severity in Severity:
         icon = ":material/check:" if done else ICONS[severity]
         with st.expander(issue.message, icon=icon, expanded=severity is Severity.BLOCKING):
             st.caption(f"`{issue.id}` · {issue.affected_rows:,} affected row(s)")
+            advice = guide(issue)
+            st.markdown(advice.meaning)
+            st.markdown(f"**What happens next:** {advice.next_step}")
+            if advice.caution:
+                st.warning(advice.caution, icon=":material/report:")
             if done:
                 st.caption(f"Acknowledged: {health.acknowledged[issue.id]}")
             if issue.sample_rows:

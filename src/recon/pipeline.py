@@ -28,6 +28,7 @@ from recon.config import (
 from recon.evaluation import attach_truth, metrics
 from recon.funnel import RULE_VERSION, STEPS, FunnelContext, build_units, run_funnel
 from recon.funnel.fx import read_rate_table
+from recon.guidance import Guidance, guide
 from recon.funnel.orphans import orphan_counts, reverse_pass
 from recon.health import (
     ACKNOWLEDGE,
@@ -78,7 +79,7 @@ __all__ = [
     "RunConfig", "FeedSpec", "Policy", "FxPolicy", "Resolution", "load_config", "save_config",
     "EVIDENCE", "PAYMENT", "SHIPMENT",
     # health and fixes
-    "HealthReport", "Issue", "FixOption", "Severity", "resolve", "undo", "acknowledge_warnings",
+    "HealthReport", "Issue", "FixOption", "Severity", "Guidance", "guide", "resolve", "undo", "acknowledge_warnings",
     "ACKNOWLEDGE", "REMAP", "EXCLUDE_ROWS", "DUPLICATE_STRATEGY", "SET_DATE_FORMAT", "SET_STATUS_POLICY",
     "CORRECT_CURRENCY", "ROUTE_TO_REVIEW", "CONVERT_CURRENCY",
     # mapping

@@ -20,7 +20,7 @@ def exclude_option(feed: str, rows: pd.DataFrame, label: str) -> FixOption:
                      {"feed": feed, "source_rows": [int(r) for r in rows[SOURCE_ROW]], "reason": ""})
 
 
-def _parse_issue(feed: str, column: str, bad: pd.DataFrame, check: str, kind: str,
+def _parse_issue(feed: str, column: str, bad: pd.DataFrame, check: str, kind: str, total_rows: int,
                  extra_options: tuple[FixOption, ...] = ()) -> Issue:
     return Issue(
         id=f"{check}:{feed}:{column}",
@@ -31,6 +31,7 @@ def _parse_issue(feed: str, column: str, bad: pd.DataFrame, check: str, kind: st
         message=f"{feed}: {len(bad)} '{column}' values are not valid {kind}",
         sample_rows=sample_rows(bad, [column]),
         fix_options=extra_options + (exclude_option(feed, bad, f"Exclude the {len(bad)} rows"),),
+        total_rows=total_rows,
     )
 
 
@@ -44,7 +45,7 @@ def unparseable_value(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list
             values = frame[column]
             bad = frame[values.notna() & pd.to_numeric(values, errors="coerce").isna()]
             if len(bad):
-                issues.append(_parse_issue(feed, column, bad, "unparseable_value", "numbers"))
+                issues.append(_parse_issue(feed, column, bad, "unparseable_value", "numbers", len(frame)))
     return issues
 
 
@@ -71,7 +72,7 @@ def unparseable_date(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[
             option = FixOption(SET_DATE_FORMAT, f"Choose the date format of '{feed}'",
                                {"feed": feed, "date_format": candidates[0] if candidates else None,
                                 "candidates": candidates})
-            issues.append(_parse_issue(feed, column, bad, "unparseable_date", "dates", (option,)))
+            issues.append(_parse_issue(feed, column, bad, "unparseable_date", "dates", len(frame), (option,)))
     return issues
 
 
@@ -100,5 +101,6 @@ def duplicate_key(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Iss
                                         ("keep_latest", "Keep the latest row per key"),
                                         ("review", "Route all duplicates to review"))
             ) + (exclude_option(feed, dupes, "Exclude all duplicate rows"),),
+            total_rows=len(open_rows),
         ))
     return issues

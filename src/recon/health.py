@@ -42,10 +42,14 @@ class Issue:
     message: str
     sample_rows: tuple[dict[str, Any], ...] = ()
     fix_options: tuple[FixOption, ...] = ()
+    total_rows: int | None = None  # rows of `feed` the check looked at, for judging the affected share
 
     def to_dict(self) -> dict[str, Any]:
+        from recon.guidance import guide
+
         out = asdict(self)
         out["severity"] = self.severity.value
+        out["guidance"] = guide(self).to_dict(self)
         return out
 
 

@@ -46,6 +46,18 @@ def _profile(value: Any) -> str:
     return f"<p>{_cell(value)}</p>"
 
 
+def _guidance(issue) -> str:
+    from recon.guidance import guide
+
+    advice = guide(issue).to_dict(issue)
+    kind = "Needs a decision" if advice["needs_decision"] else "Sign-off only"
+    recommended = (f"<p><strong>Recommended:</strong> {escape(advice['recommended_option'])}. "
+                   f"{escape(advice['why'])}</p>" if advice["recommended_option"] else "")
+    caution = f'<p class="open">{escape(advice["caution"])}</p>' if advice["caution"] else ""
+    return (f"<h3><code>{escape(issue.id)}</code> · {kind}</h3><p>{escape(advice['meaning'])}</p>"
+            f"<p>{escape(advice['next_step'])}</p>{recommended}{caution}")
+
+
 def render_health_report(report: HealthReport, title: str = "Health Report") -> str:
     open_ids = {issue.id for issue in report.open_issues}
     gate = ('<p class="closed">Gate open: the run can proceed.</p>' if report.gate_open else
@@ -62,6 +74,7 @@ def render_health_report(report: HealthReport, title: str = "Health Report") -> 
     issues = ('<div class="scroll"><table><thead><tr><th>Severity</th><th>Issue</th><th>Feed</th><th>Rows</th>'
               "<th>Message</th><th>Status</th><th>Note</th></tr></thead><tbody>"
               + "".join(issue_rows) + "</tbody></table></div>") if issue_rows else '<p class="muted">No issues.</p>'
+    advice = "".join(_guidance(issue) for issue in report.issues if issue.id in open_ids)
     samples = "".join(
         f"<h3><code>{escape(issue.id)}</code></h3>{_table([dict(row) for row in issue.sample_rows])}"
         for issue in report.issues if issue.sample_rows)
@@ -72,6 +85,7 @@ def render_health_report(report: HealthReport, title: str = "Health Report") -> 
         f"<title>{escape(title)}</title><style>{STYLE}</style></head><body>"
         f"<h1>{escape(title)}</h1>{gate}"
         f"<h2>Issues</h2>{issues}"
+        + (f"<h2>What to do</h2>{advice}" if advice else "") +
         f"<h2>Profiles</h2>{profiles or '<p class=\"muted\">No profiles.</p>'}"
         f"<h2>Sample rows</h2>{samples or '<p class=\"muted\">No samples.</p>'}"
         "</body></html>\n"

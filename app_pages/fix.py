@@ -1,4 +1,8 @@
-"""Fix: pick a fix option or acknowledge each open issue; choices become run-config resolutions."""
+"""Fix: pick a fix option or acknowledge each open issue; choices become run-config resolutions.
+
+Each issue explains what it means, what happens next and which option is recommended (``recon.guidance``).
+Issues needing a real decision come first; sign-off-only warnings can be acknowledged together.
+"""
 
 from pathlib import Path
 from typing import Callable
@@ -14,6 +18,7 @@ from recon.pipeline import (
     SET_DATE_FORMAT,
     Severity,
     acknowledge_warnings,
+    guide,
     resolve,
     undo,
 )
@@ -96,32 +101,27 @@ def option_params(issue, option) -> tuple[dict, bool]:
     return params, inputs(issue, params) if inputs else True
 
 
-if health.gate_open:
-    st.success("Health gate open: nothing left to fix.", icon=":material/check_circle:")
-    st.page_link("app_pages/run.py", label="Run reconciliation", icon=":material/play_arrow:")
-else:
-    st.error(f"Health gate closed: {len(health.open_issues)} open issue(s).", icon=":material/block:")
+RECOMMENDED = " (recommended)"
 
-open_warnings = [issue for issue in health.open_issues if issue.severity is Severity.WARNING]
-if open_warnings:
-    with st.container(border=True):
-        st.markdown(f"**Acknowledge all {len(open_warnings)} open warning(s)**")
-        note = st.text_input("Note", key="acknowledge_all_note",
-                             placeholder="Why these warnings are acceptable for this run")
-        if st.button("Acknowledge all", key="acknowledge_all", icon=":material/done_all:",
-                     disabled=not note.strip()):
-            apply(acknowledge_warnings(config, health, note.strip()))
 
-for issue in sorted(health.open_issues, key=lambda i: i.severity is not Severity.BLOCKING):
+def render_issue(issue) -> None:
+    advice = guide(issue)
     with st.container(border=True):
         st.markdown(f"**{issue.message}**")
         st.caption(f"`{issue.id}` · {issue.severity.value} · {issue.affected_rows:,} affected row(s)")
+        st.markdown(advice.meaning)
+        st.markdown(f"**What happens next:** {advice.next_step}")
+        if advice.caution:
+            st.warning(advice.caution, icon=":material/report:")
         if issue.sample_rows:
             with st.expander("Sample rows"):
                 st.dataframe(pd.DataFrame(list(issue.sample_rows)), hide_index=True,
                              alt=f"Sample rows for {issue.id}")
-        labels = [option.label for option in issue.fix_options]
-        label = st.selectbox("Fix", labels, key=f"option:{issue.id}")
+        labels = [option.label + (RECOMMENDED if index == advice.recommended else "")
+                  for index, option in enumerate(issue.fix_options)]
+        label = st.selectbox("Fix", labels, index=advice.recommended or 0, key=f"option:{issue.id}")
+        if advice.recommended is not None:
+            st.caption(f"Why recommended: {advice.why}")
         option = issue.fix_options[labels.index(label)]
         params, complete = option_params(issue, option)
         note_required = option.id == ACKNOWLEDGE
@@ -131,6 +131,37 @@ for issue in sorted(health.open_issues, key=lambda i: i.severity is not Severity
             table = params.pop("_table_bytes", None)  # an uploaded rate table joins the in-memory sources
             apply(resolve(config, issue.id, option.id, params, note),
                   state.MemorySources({**sources, params["rate_table"]: table}) if table is not None else None)
+
+
+if health.gate_open:
+    st.success("Health gate open: nothing left to fix.", icon=":material/check_circle:")
+    st.page_link("app_pages/run.py", label="Run reconciliation", icon=":material/play_arrow:")
+else:
+    st.error(f"Health gate closed: {len(health.open_issues)} open issue(s).", icon=":material/block:")
+
+decide = [issue for issue in health.open_issues if guide(issue).needs_decision]
+sign_off = [issue for issue in health.open_issues if not guide(issue).needs_decision]
+
+if decide:
+    st.subheader(f"Needs your decision ({len(decide)})")
+    st.caption("Choices about how the files are read or what proof an order needs. "
+               "Each one has a recommended option preselected; read why before applying.")
+    for issue in sorted(decide, key=lambda i: i.severity is not Severity.BLOCKING):
+        render_issue(issue)
+
+if sign_off:
+    st.subheader(f"Sign-off only ({len(sign_off)})")
+    st.caption("The run already flags the affected records as exceptions. Acknowledging records that you have "
+               "seen these findings; it hides nothing from the results.")
+    with st.container(border=True):
+        st.markdown(f"**Acknowledge all {len(sign_off)} sign-off issue(s)**")
+        note = st.text_input("Note", key="acknowledge_all_note",
+                             placeholder="Why these findings are acceptable for this run")
+        if st.button("Acknowledge all", key="acknowledge_all", icon=":material/done_all:",
+                     disabled=not note.strip()):
+            apply(acknowledge_warnings(config, health, note.strip(), {issue.id for issue in sign_off}))
+    for issue in sign_off:
+        render_issue(issue)
 
 st.subheader("Run config")
 if config.resolutions:
