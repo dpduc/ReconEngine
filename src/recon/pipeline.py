@@ -57,7 +57,7 @@ from recon.mapping import (
 )
 from recon.profiles import run_profiles
 from recon.resolutions import apply_resolutions, resolve, undo
-from recon.results import BLOCKED, COMPLETED, EXCLUDED_COLUMNS, ReconRun
+from recon.results import BLOCKED, COMPLETED, EXCLUDED_COLUMNS, ReconRun, watchlist_summary
 from recon.schema import (
     AMOUNT_COLUMNS,
     AUTO_ACCEPT,
@@ -164,7 +164,8 @@ def run(sources: Sources, config: RunConfig) -> ReconRun:
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "input_files": input_files,
         "run_config": config.to_dict(),
-        "metrics": {**metrics(results), "orphans": orphan_counts(orphans)},
+        "metrics": {**metrics(results), "orphans": orphan_counts(orphans),
+                    "close_watchlist": watchlist_summary(results)},
         "excluded_rows": {k: int(v) for k, v in prepared.excluded["feed"].value_counts().items()},
     }
     return ReconRun(status=COMPLETED, health=prepared.report, results=results,

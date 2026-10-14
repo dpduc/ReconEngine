@@ -44,7 +44,7 @@ streamlit run app.py
 | **Health** | The Health Report groups issues by severity (blocking / warning / info), with affected-row counts, sample rows and profiles. Each issue explains in plain language what was found and what happens to the affected records, and warns when it touches an implausibly large share of a file. It can be downloaded as JSON or as a standalone HTML page, both including this guidance. |
 | **Fix** | Issues are split into **Needs your decision** (blocking issues, uncovered order statuses, currency mismatches) and **Sign-off only** (findings the run already flags as exceptions). Each issue has a recommended option preselected, with the reason. Sign-off issues can be acknowledged together with one note. Each choice is written into the run config and the checks run again. The run config can be downloaded. |
 | **Run** | Available only once the gate is open. Runs the funnel and shows the counts at each step. |
-| **Review** | The exception queue (EXCEPTION and REVIEW units plus orphan records) is ranked by amount at risk, then age. For any unit you can see its OMS, bank and 3PL rows side by side, and download the full results bundle. |
+| **Review** | The exception queue (EXCEPTION and REVIEW units plus orphan records) is ranked by amount at risk, then age. For any unit you can see its OMS, bank and 3PL rows side by side, and download the full results bundle. A separate view lists the **close watchlist**: units auto-accepted with a note (e.g. installment interest), to revisit first if the period cannot be closed. |
 
 The **Benchmark** pages (executive overview, data contract, model diagnostics,
 Olist source explorer) show the bundled Olist benchmark.
@@ -68,7 +68,8 @@ report = inspect("data/generated", config)   # HealthReport: issues, profiles, g
 outcome = run("data/generated", config)      # ReconRun, or a "blocked" run listing the open issues
 outcome.results          # one row per unit: deciding step, decision, reason codes, deltas, explanation
 outcome.exception_queue  # EXCEPTION + REVIEW units and orphans, ranked
-outcome.bundle()         # decisions, triage queue, exception queue, orphans, funnel, excluded rows, manifest
+outcome.close_watchlist # auto-accepted with a note; revisit first if the period won't close
+outcome.bundle()         # decisions, triage queue, exception queue, orphans, close watchlist, funnel, excluded rows, manifest
 ```
 
 ### Run config
@@ -153,8 +154,8 @@ missing shipments.
 | 4 | `link_constrained` | links on same currency, amount within tolerance and date within the window. Never auto-matches when several candidates qualify |
 | 5 | `link_candidates` | REVIEW with `LINK_CANDIDATES`: proposes candidates with a confidence score, never auto-accepted |
 | 6 | `route_review` | REVIEW: duplicate keys whose strategy is "route to review" |
-| 7 | rule checks | `MISSING_PAYMENT` → `CURRENCY_MISMATCH` → `FX_DIFFERENCE` → `AMOUNT_MISMATCH` → `MISSING_SHIPMENT` → fee / COD fee → `TIMING_MISMATCH` |
-| 8 | `decision` | `AUTO_ACCEPT` |
+| 7 | rule checks | `MISSING_PAYMENT` → `CURRENCY_MISMATCH` → `FX_DIFFERENCE` → `AMOUNT_MISMATCH` → `MISSING_SHIPMENT` → fee / COD fee → `TIMING_MISMATCH` → `POSSIBLE_INSTALLMENT_INTEREST` (REVIEW) |
+| 8 | `decision` | `AUTO_ACCEPT` (`INSTALLMENT_INTEREST` when the stated interest explains the delta) |
 | 9 | `reverse_pass` | `ORPHAN_PAYMENT` / `ORPHAN_SHIPMENT`: bank or 3PL records that link to no order |
 
 Each unit gets one reason code (the first check it fails) and a plain-language
@@ -167,18 +168,20 @@ Results on the full Olist benchmark (99,441 orders, every warning acknowledged):
 
 | Metric | Value |
 |---|---|
-| Auto-accepted | 95,332 (95.9%) |
+| Auto-accepted | 95,575 (96.1%), of which 243 with a note (installment interest) |
 | Auto-accept precision | 1.000 |
 | Review rate | 0.0% |
-| Exceptions | 4,109 |
+| Exceptions | 3,866 |
 | Orphans | 0 |
+| Close watchlist | 243 units, 3,015.26 BRL of installment interest |
 
 | Reason code | Predicted | Precision | Recall |
 |---|---|---|---|
 | `MISSING_SOURCE_EVIDENCE` | 775 | 1.00 | 1.00 |
 | `ORDER_STATUS_REQUIRES_POLICY` | 1,082 | 1.00 | 1.00 |
 | `MISSING_PAYMENT` | 477 | 1.00 | 1.00 |
-| `AMOUNT_MISMATCH` | 1,274 | 0.77 | 1.00 |
+| `AMOUNT_MISMATCH` | 1,031 | 1.00 | 1.00 |
+| `INSTALLMENT_INTEREST` (auto-accepted with a note) | 243 | 1.00 | 1.00 |
 | `MISSING_SHIPMENT` | 471 | 1.00 | 1.00 |
 | `TIMING_MISMATCH` | 30 | — | — |
 
@@ -188,7 +191,8 @@ already score about 96%.
 
 **Known gaps in the benchmark:**
 
-- **Amount mismatches the ground truth calls matched:** 297 of the `AMOUNT_MISMATCH` predictions are orders the ground truth labels as matched, yet their amounts really differ. A tolerance can't absorb them without missing real `AMOUNT_ERROR`s, which are always exactly 5% and at least 1.00 BRL. They may be vouchers or instalment interest, which needs confirmation from the business.
+- **Simulated interest column:** the real Olist payment total exceeds items + freight on some installment orders: interest on installments. Olist has no interest column, so the generator adds `interest_amount` to the bank feed, as PSP statements report it (real payment total minus the order amount on those orders). Without that column the engine cannot tell interest from an overpayment: a band-only rule would also have auto-accepted 521 of the 977 injected `AMOUNT_ERROR`s. Feeds that report installments but no interest get `POSSIBLE_INSTALLMENT_INTEREST` (REVIEW) instead.
+- **Real unexplained deltas:** 54 orders whose real payment differs from items + freight for no known reason are labelled `SOURCE_AMOUNT_DELTA` and expected as `AMOUNT_MISMATCH`.
 - **Timing mismatches have no labels:** the 30 picked-after-delivered shipments are real anomalies in the data, but the ground truth has no label for them.
 - **Rules the benchmark can't exercise:** the benchmark is 100% prepaid, with one transaction and one shipment per order. The COD, fee, constrained-link and duplicate rules are therefore covered only by the hand-built test fixtures.
 

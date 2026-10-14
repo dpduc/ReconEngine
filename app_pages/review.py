@@ -11,17 +11,24 @@ st.title("Review")
 outcome = state.require_run()
 
 QUEUE = "Exception queue"
+WATCHLIST = "Revisit if the period won't close"
 VIEWS = {
     QUEUE: lambda: outcome.exception_queue,  # EXCEPTION and REVIEW units plus orphans
     "Needs review": lambda: outcome.exception_queue.query("decision == 'REVIEW'").reset_index(drop=True),
     "Orphans": lambda: outcome.exception_queue.query("record_type != 'oms'").reset_index(drop=True),
     "All units": lambda: outcome.results.assign(record_type="oms", record_ref=outcome.results["order_id"]),
+    WATCHLIST: lambda: outcome.close_watchlist.assign(record_type="oms", record_ref=outcome.close_watchlist["order_id"],
+                                                      amount_at_risk=outcome.close_watchlist["note_amount"]),
 }
 with st.container(horizontal=True, vertical_alignment="bottom"):
     view = st.segmented_control("Records", list(VIEWS), default=QUEUE, key="review_view")
     st.download_button("Download bundle", lambda: state.bundle_zip(outcome), file_name="recon_bundle.zip",
                        mime="application/zip", icon=":material/download:", on_click="ignore")
 records = VIEWS[view or QUEUE]()
+if view == WATCHLIST:
+    st.info("Auto-accepted with a note (e.g. installment interest the statement reports). If the period cannot "
+            "be closed after every other case is handled, revisit these first, largest amount first.",
+            icon=":material/flag:")
 
 
 def codes(value) -> list[str]:

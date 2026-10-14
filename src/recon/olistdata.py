@@ -16,6 +16,9 @@ from pathlib import Path
 import pandas as pd
 
 
+DELTA_TOLERANCE = 0.01 + 1e-9  # same absolute tolerance the engine uses by default
+
+
 def generate_from_olist(
     source_dir: str | Path,
     out_dir: str | Path,
@@ -34,7 +37,9 @@ def generate_from_olist(
         item_total=("price", "sum"), freight_total=("freight_value", "sum")
     )
     payment_totals = payments.groupby("order_id", as_index=False).agg(
-        payment_total=("payment_value", "sum")
+        payment_total=("payment_value", "sum"),
+        installments=("payment_installments", "max"),
+        payment_type=("payment_type", lambda types: "+".join(sorted(set(types)))),
     )
     eligible = orders.merge(item_totals, on="order_id", how="left")
     eligible = eligible.merge(payment_totals, on="order_id", how="left")
@@ -54,6 +59,11 @@ def generate_from_olist(
         order_id = row.order_id
         amount = float(row.order_amount) if pd.notna(row.order_amount) else None
         payment = float(row.payment_total) if pd.notna(row.payment_total) else None
+        installments = int(row.installments) if pd.notna(row.installments) else 1
+        # The real Olist payment total can exceed items + freight: interest on installment payments.
+        # Olist has no interest column; PSP statements do, so the bank feed carries it (simulated).
+        real_delta = round(payment - amount, 2) if amount is not None and payment is not None else 0.0
+        interest = real_delta if installments > 1 and real_delta > DELTA_TOLERANCE else 0.0
         scenario = "MATCHED"
         expected_outcome = "PASS_1"
         expected_exception = ""
@@ -78,6 +88,11 @@ def generate_from_olist(
             elif draw < 0.02:
                 has_shipment = False
                 scenario, expected_outcome, expected_exception = "MISSING_SHIPMENT", "EXCEPTION", "MISSING_SHIPMENT"
+        if scenario == "MATCHED" and abs(real_delta) > DELTA_TOLERANCE:
+            if interest:
+                scenario, expected_exception = "INSTALLMENT_INTEREST", "INSTALLMENT_INTEREST"
+            else:  # a real, unexplained difference in the Olist data: the engine should flag it
+                scenario, expected_outcome, expected_exception = "SOURCE_AMOUNT_DELTA", "EXCEPTION", "AMOUNT_MISMATCH"
         tracking = f"OLIST-{order_id}"
         ordered_at = row.order_purchase_timestamp.isoformat()
         delivered_at = row.order_delivered_customer_date
@@ -97,6 +112,7 @@ def generate_from_olist(
                 "description": f"OLIST PAYMENT {order_id}",
                 "currency": "BRL", "credit_amount": payment,
                 "fee_amount": 0.0, "net_amount": payment,
+                "installments": installments, "payment_type": row.payment_type, "interest_amount": interest,
             })
         if has_shipment:
             logistics_rows.append({
@@ -131,13 +147,17 @@ def generate_from_olist(
         files[name] = {"rows": len(frame), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
     manifest = {
         "generator": "recon.olistdata",
-        "generator_version": "1.1.0",
+        "generator_version": "1.2.0",
         "source": "brazil ecom",
         "source_files": ["olist_orders_dataset.csv", "olist_order_items_dataset.csv", "olist_order_payments_dataset.csv"],
         "seed": seed, "units": len(truth_rows), "currency": "BRL",
         "source_status_counts": orders["order_status"].value_counts().sort_index().to_dict(),
         "scenario_counts": pd.Series([r["scenario"] for r in truth_rows]).value_counts().to_dict(),
         "files": files,
+        "simulated_columns": {
+            "bank_statement.interest_amount": "real Olist payment total minus items + freight on installment "
+                                              "payments that exceed the order; Olist itself has no interest column",
+        },
     }
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     return manifest

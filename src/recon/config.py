@@ -43,6 +43,9 @@ class Policy:
     cod_fee_bps: int = 80
     amount_tolerance: float = 0.01  # absolute, in the feed currency
     link_date_window_days: int = 4  # linking pass 2: |value_date - order date| allowed
+    # Without a stated interest, an installment credit up to this share above the order is
+    # POSSIBLE_INSTALLMENT_INTEREST (REVIEW) rather than AMOUNT_MISMATCH.
+    installment_interest_max: float = 0.5
     # order status -> the EVIDENCE it requires; unlisted statuses are pending policy
     status_policy: dict[str, tuple[str, ...]] = field(default_factory=_default_status_policy)
     fx: FxPolicy | None = None  # None: credits in another currency than their order are not compared

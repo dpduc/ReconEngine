@@ -135,7 +135,8 @@ def test_export_bundle_holds_every_artifact_and_reads_back(tmp_path):
     bundle = outcome.bundle()
 
     assert set(bundle) == {"decisions.csv", "triage_queue.csv", "exception_queue.csv",
-                           "orphans.csv", "funnel.csv", "excluded.csv", "manifest.json"}
+                           "orphans.csv", "close_watchlist.csv", "funnel.csv", "excluded.csv",
+                           "manifest.json"}
     read = lambda name: pd.read_csv(io.StringIO(bundle[name]))
     assert len(read("decisions.csv")) == 3
     assert list(read("orphans.csv")["txn_ref"]) == ["P9"]

@@ -11,10 +11,10 @@ from typing import Callable
 import pandas as pd
 
 from recon.contracts import fee
-from recon.funnel.base import FunnelContext, FunnelStep, StepOutcome, cod_remittance, split
+from recon.funnel.base import FunnelContext, FunnelStep, StepOutcome, cod_remittance, decide, split
 from recon.funnel.fx import lookup_rates
 from recon.funnel.reasons import exception
-from recon.schema import CURRENCY
+from recon.schema import CURRENCY, INSTALLMENTS, INTEREST_AMOUNT, REVIEW
 
 
 def _within(delta: pd.Series, tolerance: float) -> pd.Series:
@@ -49,6 +49,7 @@ def _measure(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     )
     out["fee_within_tolerance"] = _within(out["fee_delta"], policy.amount_tolerance)
     out["cod_fee_within_tolerance"] = _within(out["cod_fee_delta"], policy.amount_tolerance)
+    _installment_interest(out, policy)
     out["fx_within_tolerance"] = out["fx_converted"] & (
         out["credit_delta"].abs() <= policy.fx.tolerance * out["expected_credit"].abs() + 1e-9
         if policy.fx else False)
@@ -60,6 +61,32 @@ def _measure(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     # A unit reaching the decision passed every check; a linked shipment must also agree on tracking number.
     out["tracking_consistent"] = ~out["shipment_found"] | out["tracking_exact"]
     return out
+
+
+def _bank_number(out: pd.DataFrame, column: str) -> pd.Series | None:
+    """A numeric bank column (suffixed on the join when the name clashed), or None when the feed lacks it."""
+    name = next((c for c in (column, f"{column}_bank") if c in out), None)
+    return pd.to_numeric(out[name], errors="coerce") if name else None
+
+
+def _installment_interest(out: pd.DataFrame, policy) -> None:
+    """Explain a credit above the expected amount as installment interest.
+
+    With an interest column, a delta equal to the stated interest is explained (auto-accepted with a
+    note). Without one, a positive delta within `installment_interest_max` on an installment payment
+    is only possible interest: a reviewer confirms it. Nothing else counts as interest.
+    """
+    installments, interest = _bank_number(out, INSTALLMENTS), _bank_number(out, INTEREST_AMOUNT)
+    over = out["bank_found"] & ~out["amount_within_tolerance"] & (out["credit_delta"] > policy.amount_tolerance)
+    paid_in_parts = installments.fillna(0) > 1 if installments is not None else pd.Series(False, index=out.index)
+    if interest is not None:
+        stated = interest.fillna(0)
+        out["interest_explained"] = over & (stated > 0) & _within(out["credit_delta"] - stated, policy.amount_tolerance)
+        out["interest_possible"] = False
+    else:
+        out["interest_explained"] = False
+        out["interest_possible"] = over & paid_in_parts & (
+            out["credit_delta"] <= policy.installment_interest_max * out["expected_credit"].abs())
 
 
 def _currencies(out: pd.DataFrame, ctx: FunnelContext) -> None:
@@ -107,16 +134,29 @@ def _rule(reason: str, fails: Callable[[pd.DataFrame], pd.Series]):
     return check
 
 
+POSSIBLE_INTEREST_CONFIDENCE = 0.5
+
+
+def possible_installment_interest(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
+    """Units whose only discrepancy may be unstated installment interest go to REVIEW (low priority)."""
+    units = _measure(units, ctx)
+    possible, remaining = split(units, units["interest_possible"].astype(bool))
+    decided = decide(possible, REVIEW, POSSIBLE_INTEREST_CONFIDENCE, "POSSIBLE_INSTALLMENT_INTEREST").assign(priority=1)
+    return StepOutcome(decided=decided, remaining=remaining)
+
+
 RULE_STEPS: list[FunnelStep] = [
     FunnelStep("missing_payment", _rule("MISSING_PAYMENT", lambda u: u["requires_payment"] & ~u["bank_found"])),
     FunnelStep("currency_mismatch", _rule("CURRENCY_MISMATCH", lambda u: u["bank_found"] & ~u["currency_ok"])),
     FunnelStep("fx_difference", _rule("FX_DIFFERENCE", lambda u: u["bank_found"] & ~u["amount_within_tolerance"]
                                       & u["fx_within_tolerance"])),
-    FunnelStep("amount_mismatch", _rule("AMOUNT_MISMATCH", lambda u: u["bank_found"] & ~u["amount_within_tolerance"])),
+    FunnelStep("amount_mismatch", _rule("AMOUNT_MISMATCH", lambda u: u["bank_found"] & ~u["amount_within_tolerance"]
+                                        & ~u["interest_explained"] & ~u["interest_possible"])),
     FunnelStep("missing_shipment", _rule("MISSING_SHIPMENT",
                                          lambda u: u["requires_shipment"] & ~u["shipment_found"])),
     FunnelStep("fee_mismatch", _rule("FEE_MISMATCH", lambda u: u["bank_found"] & ~u["fee_within_tolerance"])),
     FunnelStep("cod_fee_mismatch", _rule("COD_FEE_MISMATCH",
                                          lambda u: u["shipment_found"] & ~u["cod_fee_within_tolerance"])),
     FunnelStep("timing_mismatch", _rule("TIMING_MISMATCH", lambda u: u["shipment_found"] & ~u["timing_ok"])),
+    FunnelStep("possible_installment_interest", possible_installment_interest),
 ]
