@@ -40,7 +40,7 @@ streamlit run app.py
 
 | Step | What happens |
 |---|---|
-| **Load** | Upload the OMS, bank and logistics files (CSV, XLSX or Parquet). The engine suggests a column mapping from column names and value patterns, and flags any suggestion it isn't sure of; nothing is mapped silently. A confirmed mapping can be saved as a profile and reused. |
+| **Load** | Upload the OMS, bank and logistics files (CSV, XLSX or Parquet), or point at a **local folder** and pick a file for each feed. Uploads stay in memory and folder files are read in place, so no copies are written to disk. Local-folder mode only works when the app runs on the machine that holds the folder. The engine suggests a column mapping from column names and value patterns, and flags any suggestion it isn't sure of; nothing is mapped silently. A confirmed mapping can be saved as a profile and reused. |
 | **Health** | The Health Report groups issues by severity (blocking / warning / info), with affected-row counts, sample rows and profiles. It can be downloaded as JSON or as a standalone HTML page. |
 | **Fix** | Pick a fix option for each issue, or acknowledge a warning with a note. Each choice is written into the run config and the checks run again. The run config can be downloaded. |
 | **Run** | Available only once the gate is open. Runs the funnel and shows the counts at each step. |
@@ -63,6 +63,7 @@ config = draft.config            # draft.flagged lists the mapping suggestions t
 # ...or load a saved run config
 config = load_config("configs/olist_benchmark.json")
 
+# sources: a folder, or the files themselves in memory as {relative path: bytes}
 report = inspect("data/generated", config)   # HealthReport: issues, profiles, gate_open
 outcome = run("data/generated", config)      # ReconRun, or a "blocked" run listing the open issues
 outcome.results          # one row per unit: deciding step, decision, reason codes, deltas, explanation

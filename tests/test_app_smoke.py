@@ -1,6 +1,7 @@
 """Headless smoke checks of the wizard (Load -> Health -> Fix -> Run -> Review); the UI has no unit tests."""
 
 import json
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -122,3 +123,33 @@ def test_run_then_review_without_exceptions(tmp_path):
     # The top-ranked record is traced to its source rows through row hashes.
     shown = {frame.value.loc["row_hash", "value"] for frame in at.dataframe if "row_hash" in frame.value.index}
     assert shown == set(run.exception_queue.iloc[0]["input_row_hashes"].split("|"))
+
+
+def test_uploads_stay_in_memory():
+    temp = Path(tempfile.gettempdir())
+    before = set(temp.glob("recon-upload-*"))
+
+    at = upload(AppTest.from_file(APP, default_timeout=60).run(), renamed())
+
+    assert set(temp.glob("recon-upload-*")) == before
+    sources = at.session_state["sources"]
+    assert isinstance(sources, dict) and sorted(sources) == ["bank/bank.csv", "logistics/3pl.csv", "oms/orders.csv"]
+
+
+def test_local_folder_is_read_in_place(tmp_path):
+    for feed, (name, content) in renamed().items():
+        (tmp_path / name).write_bytes(content)
+    at = AppTest.from_file(APP, default_timeout=60).run()
+    at.switch_page("app_pages/load.py").run()
+    at.segmented_control(key="load_mode").set_value("Local folder").run()
+    at.text_input(key="local_folder").input(str(tmp_path)).run()
+    for feed, (name, _) in renamed().items():
+        at.selectbox(key=f"folder_{feed}").set_value(name)
+    at.run()
+    assert not at.exception
+    at.button(key="confirm_mapping").click().run()
+    assert not at.exception
+
+    assert at.session_state["sources"] == str(tmp_path)
+    assert at.session_state["config"].feeds["bank"].path == "bank.csv"
+    assert inspect(str(tmp_path), at.session_state["config"]).gate_open

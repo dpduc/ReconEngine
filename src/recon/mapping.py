@@ -17,7 +17,7 @@ from pathlib import Path
 import pandas as pd
 
 from recon.config import FeedSpec, RunConfig
-from recon.ingest import READERS, detect_delimiter, detect_encoding
+from recon.ingest import READERS, Sources, detect_delimiter, detect_encoding, read_source
 from recon.schema import FILE_EXTENSIONS, REQUIRED_COLUMNS
 
 # Header names other systems use for each canonical column.
@@ -179,29 +179,29 @@ def suggest_mapping(feed: str, frame: pd.DataFrame) -> dict[str, Suggestion]:
     return suggestions
 
 
-def _feed_spec(folder: Path, path: str) -> FeedSpec:
+def _feed_spec(path: str, data: bytes) -> FeedSpec:
     fmt = FILE_EXTENSIONS.get(Path(path).suffix.lower())
     if fmt is None:
         raise ValueError(f"{path}: cannot infer format from extension")
     if fmt != "csv":
         return FeedSpec(path, format=fmt)
-    encoding = detect_encoding(folder / path)
-    return FeedSpec(path, format="csv", encoding=encoding, delimiter=detect_delimiter(folder / path, encoding))
+    encoding = detect_encoding(data)
+    return FeedSpec(path, format="csv", encoding=encoding, delimiter=detect_delimiter(data, encoding))
 
 
-def draft_config(sources: str | Path, files: dict[str, str],
+def draft_config(sources: Sources, files: dict[str, str],
                  profiles: list[MappingProfile] | tuple[MappingProfile, ...] = (),
                  base: RunConfig | None = None) -> DraftConfig:
-    """Draft a run config for `files` ({feed: path relative to `sources`}).
+    """Draft a run config for `files` ({feed: path relative to `sources`}, a folder or in-memory files).
 
     A profile for the feed whose columns are all present is reused verbatim;
     otherwise the mapping is suggested. Policy and ground truth come from `base`.
     """
-    folder = Path(sources)
     feeds, mapping, suggestions, columns = {}, {}, {}, {}
     for feed, path in files.items():
-        spec = feeds[feed] = _feed_spec(folder, path)
-        raw = READERS[spec.format](folder / path, spec)
+        data = read_source(sources, path)
+        spec = feeds[feed] = _feed_spec(path, data)
+        raw = READERS[spec.format](data, spec)
         columns[feed] = tuple(raw.columns)
         profile = next((p for p in profiles if p.feed == feed and p.matches(list(raw.columns))), None)
         if profile is not None:

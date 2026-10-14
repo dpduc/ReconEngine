@@ -5,8 +5,7 @@ import streamlit as st
 from recon_app import state
 
 st.title("Run")
-sources, config = state.inputs()
-st.caption(f"Inputs: {'bundled Olist benchmark' if state.is_benchmark() else sources}")
+st.caption(f"Inputs: {state.describe_inputs()}")
 
 health = st.session_state[state.HEALTH]
 gate_closed = health is not None and not health.gate_open

@@ -10,7 +10,7 @@ ICONS = {Severity.BLOCKING: ":material/block:", Severity.WARNING: ":material/war
          Severity.INFO: ":material/info:"}
 
 st.title("Health")
-st.caption(f"Inputs: {'bundled Olist benchmark' if state.is_benchmark() else state.inputs()[0]}")
+st.caption(f"Inputs: {state.describe_inputs()}")
 health = state.check_health()
 
 if health.gate_open:

@@ -5,9 +5,9 @@ Everything a shell needs (config types, fix-option ids, schema names) is re-expo
 
 from __future__ import annotations
 
+import io
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 
 import pandas as pd
 
@@ -29,7 +29,7 @@ from recon.health import (
     Issue,
     Severity,
 )
-from recon.ingest import LoadedFeed, file_sha256, load_feed, parse_numeric
+from recon.ingest import LoadedFeed, Sources, describe_sources, load_feed, parse_numeric, read_source, sha256
 from recon.mapping import (
     DraftConfig,
     MappingProfile,
@@ -58,7 +58,7 @@ from recon.schema import (
 )
 
 __all__ = [
-    "inspect", "run",
+    "inspect", "run", "Sources", "describe_sources",
     # config
     "RunConfig", "FeedSpec", "Policy", "Resolution", "load_config", "save_config", "EVIDENCE", "PAYMENT", "SHIPMENT",
     # health and fixes
@@ -96,7 +96,7 @@ def _split_excluded(feeds: dict[str, pd.DataFrame]) -> tuple[dict[str, pd.DataFr
     return kept, table.reindex(columns=list(EXCLUDED_COLUMNS))
 
 
-def _prepare(sources: str | Path, config: RunConfig) -> _Prepared:
+def _prepare(sources: Sources, config: RunConfig) -> _Prepared:
     ingested_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     inputs = {
         name: load_feed(name, sources, spec, config.mapping.get(name, {}), ingested_at)
@@ -111,15 +111,16 @@ def _prepare(sources: str | Path, config: RunConfig) -> _Prepared:
     return _Prepared(inputs, feeds, report, excluded)
 
 
-def inspect(sources: str | Path, config: RunConfig) -> HealthReport:
+def inspect(sources: Sources, config: RunConfig) -> HealthReport:
     """Load, map, normalize and check the feeds declared in `config`.
 
-    `sources` is the folder that feed paths in the config are relative to.
+    `sources` is the folder that feed paths in the config are relative to, or the files
+    themselves held in memory as `{relative path: bytes}`.
     """
     return _prepare(sources, config).report
 
 
-def run(sources: str | Path, config: RunConfig) -> ReconRun:
+def run(sources: Sources, config: RunConfig) -> ReconRun:
     """Re-inspect; refuse with a blocked run while the gate is closed, else run the funnel."""
     prepared = _prepare(sources, config)
     if not prepared.report.gate_open:
@@ -132,9 +133,9 @@ def run(sources: str | Path, config: RunConfig) -> ReconRun:
     input_files = {name: {"path": config.feeds[name].path, "sha256": loaded.sha256}
                    for name, loaded in prepared.inputs.items()}
     if config.ground_truth:
-        truth_path = Path(sources) / config.ground_truth
-        results = attach_truth(results, pd.read_csv(truth_path))
-        input_files["ground_truth"] = {"path": config.ground_truth, "sha256": file_sha256(truth_path)}
+        truth = read_source(sources, config.ground_truth)
+        results = attach_truth(results, pd.read_csv(io.BytesIO(truth)))
+        input_files["ground_truth"] = {"path": config.ground_truth, "sha256": sha256(truth)}
     manifest = {
         "rule_version": RULE_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

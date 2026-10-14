@@ -2,9 +2,10 @@
 
 Session keys (the contract between wizard pages):
 
-- ``sources`` (str) and ``config`` (RunConfig): the inputs. Default to the bundled Olist
-  benchmark; Load stages uploads and drafts a config, Fix adds resolutions, both through
-  ``set_inputs``.
+- ``sources`` (folder path, or uploaded files as ``{relative path: bytes}``) and ``config``
+  (RunConfig): the inputs. Default to the bundled Olist benchmark; Load drafts a config from
+  uploads (kept in memory, never written to disk) or from a local folder read in place, Fix
+  adds resolutions, both through ``set_inputs``.
 - ``health`` (HealthReport | None): the latest ``inspect`` result for the inputs. A Health
   page sets it; Run disables itself while it reports a closed gate.
 - ``recon_run`` (ReconRun | None): the latest ``run`` result for the inputs.
@@ -15,8 +16,8 @@ from __future__ import annotations
 import hashlib
 import io
 import json
-import tempfile
 import zipfile
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 
@@ -28,6 +29,8 @@ from recon.pipeline import (
     MappingProfile,
     ReconRun,
     RunConfig,
+    Sources,
+    describe_sources,
     draft_config,
     inspect,
     load_config,
@@ -50,13 +53,28 @@ def init() -> None:
     st.session_state.setdefault(RUN, None)
 
 
-def inputs() -> tuple[str, RunConfig]:
+def inputs() -> tuple[Sources, RunConfig]:
     return st.session_state[SOURCES], st.session_state[CONFIG]
 
 
-def set_inputs(sources: str, config: RunConfig) -> None:
+def sources_key(sources: Sources) -> str:
+    """Stable identity of `sources` for caching and widget keys: the folder, or a content digest."""
+    if not isinstance(sources, Mapping):
+        return str(sources)
+    digest = hashlib.sha256()
+    for path, content in sorted(sources.items()):
+        digest.update(path.encode() + b"\0" + hashlib.sha256(content).digest())
+    return f"memory:{digest.hexdigest()[:16]}"
+
+
+def describe_inputs() -> str:
+    return "bundled Olist benchmark" if is_benchmark() else describe_sources(inputs()[0])
+
+
+def set_inputs(sources: Sources, config: RunConfig) -> None:
     """Replace the inputs; health and run results for the old inputs are dropped."""
-    if (sources, config) != inputs():
+    current, current_config = inputs()
+    if (sources_key(sources), config) != (sources_key(current), current_config):
         st.session_state[SOURCES], st.session_state[CONFIG] = sources, config
         st.session_state[HEALTH] = st.session_state[RUN] = None
 
@@ -65,64 +83,56 @@ def use_benchmark() -> None:
     set_inputs(BENCHMARK_SOURCES, load_config(BENCHMARK_CONFIG))
 
 
-def stage_uploads(files: dict[str, tuple[str, bytes]]) -> tuple[str, dict[str, str]]:
-    """Write `{feed: (file name, content)}` to a folder named after its content.
+def upload_sources(files: dict[str, tuple[str, bytes]]) -> tuple[dict[str, bytes], dict[str, str]]:
+    """In-memory sources for `{feed: (file name, content)}` uploads, and `{feed: relative path}`.
 
-    Returns the folder and `{feed: path relative to it}`; raw bytes are kept as uploaded.
+    Raw bytes are kept exactly as uploaded; nothing is written to disk.
     """
-    digest = hashlib.sha256()
-    for feed, (name, content) in sorted(files.items()):
-        digest.update(f"{feed}/{name}".encode() + hashlib.sha256(content).digest())
-    folder = Path(tempfile.gettempdir()) / f"recon-upload-{digest.hexdigest()[:16]}"
-    paths = {}
-    for feed, (name, content) in files.items():
-        path = folder / feed / Path(name).name
-        path.parent.mkdir(parents=True, exist_ok=True)
-        if not path.exists() or path.read_bytes() != content:
-            path.write_bytes(content)
-        paths[feed] = path.relative_to(folder).as_posix()
-    return str(folder), paths
+    paths = {feed: f"{feed}/{Path(name).name}" for feed, (name, _) in files.items()}
+    return {paths[feed]: content for feed, (_, content) in files.items()}, paths
 
 
+# Cached on `key` (see `sources_key`); the leading underscore keeps Streamlit from hashing the bytes.
 @st.cache_resource(max_entries=4, show_spinner=False)
-def _draft(sources: str, files_json: str, profiles_json: str) -> DraftConfig:
+def _draft(_sources: Sources, key: str, files_json: str, profiles_json: str) -> DraftConfig:
     # Policy comes from the benchmark; uploads start with no resolutions and no ground truth.
     base = replace(load_config(BENCHMARK_CONFIG), resolutions=(), ground_truth=None)
     profiles = [MappingProfile(**p) for p in json.loads(profiles_json)]
-    return draft_config(sources, json.loads(files_json), profiles=profiles, base=base)
+    return draft_config(_sources, json.loads(files_json), profiles=profiles, base=base)
 
 
-def draft(sources: str, files: dict[str, str], profiles: list[dict]) -> DraftConfig:
+def draft(sources: Sources, files: dict[str, str], profiles: list[dict]) -> DraftConfig:
     with st.spinner("Reading exports and suggesting a mapping..."):
-        return _draft(sources, json.dumps(files, sort_keys=True), json.dumps(profiles, sort_keys=True))
+        return _draft(sources, sources_key(sources), json.dumps(files, sort_keys=True),
+                      json.dumps(profiles, sort_keys=True))
 
 
 def is_benchmark() -> bool:
     sources, config = inputs()
-    return sources == BENCHMARK_SOURCES and config == load_config(BENCHMARK_CONFIG)
+    return sources_key(sources) == BENCHMARK_SOURCES and config == load_config(BENCHMARK_CONFIG)
 
 
 @st.cache_resource(max_entries=4, show_spinner=False)
-def _inspect(sources: str, config_json: str) -> HealthReport:
-    return inspect(sources, RunConfig.from_dict(json.loads(config_json)))
+def _inspect(_sources: Sources, key: str, config_json: str) -> HealthReport:
+    return inspect(_sources, RunConfig.from_dict(json.loads(config_json)))
 
 
 @st.cache_resource(max_entries=4, show_spinner=False)
-def _run(sources: str, config_json: str) -> ReconRun:
-    return run(sources, RunConfig.from_dict(json.loads(config_json)))
+def _run(_sources: Sources, key: str, config_json: str) -> ReconRun:
+    return run(_sources, RunConfig.from_dict(json.loads(config_json)))
 
 
 def check_health() -> HealthReport:
     sources, config = inputs()
     with st.spinner("Inspecting feeds..."):
-        st.session_state[HEALTH] = _inspect(sources, config.to_json())
+        st.session_state[HEALTH] = _inspect(sources, sources_key(sources), config.to_json())
     return st.session_state[HEALTH]
 
 
 def start_run() -> ReconRun:
     sources, config = inputs()
     with st.spinner("Running reconciliation..."):
-        outcome = _run(sources, config.to_json())
+        outcome = _run(sources, sources_key(sources), config.to_json())
     st.session_state[RUN] = outcome
     st.session_state[HEALTH] = outcome.health
     return outcome
