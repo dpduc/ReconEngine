@@ -50,7 +50,7 @@ def warning(issue_id: str, check: str, feed: str, frame: pd.DataFrame, mask: pd.
     return Issue(
         id=issue_id, check=check, severity=Severity.WARNING, feed=feed,
         affected_rows=int(mask.sum()), message=message, sample_rows=sample(frame[mask]),
-        fix_options=fixes + (FixOption(ACKNOWLEDGE, "Acknowledge with a note"),),
+        fix_options=fixes + (FixOption(ACKNOWLEDGE, "Acknowledge with a note"),), total_rows=len(frame),
     )
 
 

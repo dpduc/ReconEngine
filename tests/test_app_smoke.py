@@ -86,7 +86,7 @@ def test_flagged_mapping_is_remapped_on_the_fix_page():
 
 
 @pytest.mark.skipif(not (OLIST / "oms_orders.csv").exists(), reason="run recon.olistdata first")
-def test_benchmark_upload_opens_the_gate_after_acknowledging_warnings():
+def test_benchmark_upload_opens_the_gate_after_sign_off_and_recommended_decisions():
     files = {feed: (name, (OLIST / name).read_bytes()) for feed, name in
              {"oms": "oms_orders.csv", "bank": "bank_statement.csv", "logistics": "logistics_report.csv"}.items()}
     at = upload(AppTest.from_file(APP, default_timeout=600).run(), files)
@@ -95,10 +95,21 @@ def test_benchmark_upload_opens_the_gate_after_acknowledging_warnings():
     assert not at.exception
     health = at.session_state["health"]
     assert not health.blocking_issues and not health.gate_open  # only warnings stand in the way
+    assert [h.value for h in at.subheader][:2] == ["Needs your decision (6)", "Sign-off only (9)"]
 
+    # "Acknowledge all" covers the sign-off issues only; the status decisions stay open.
     at.text_input(key="acknowledge_all_note").input("Known Olist data gaps").run()
     at.button(key="acknowledge_all").click().run()
     assert not at.exception
+    open_ids = [issue.id for issue in at.session_state["health"].open_issues]
+    assert open_ids and all(i.startswith("status_not_in_policy:") for i in open_ids)
+
+    # Each decision comes with its recommendation preselected; applying them opens the gate.
+    assert at.selectbox(key="option:status_not_in_policy:canceled").value.endswith("(recommended)")
+    for issue_id in open_ids:  # 'created' is left pending (acknowledge), which needs a note
+        at.text_input(key=f"note:{issue_id}").input("Following the recommendation").run()
+        at.button(key=f"apply:{issue_id}").click().run()
+        assert not at.exception
     assert at.session_state["health"].gate_open
 
 
