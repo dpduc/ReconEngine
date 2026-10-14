@@ -82,6 +82,38 @@ A run config is a JSON file (or YAML, if PyYAML is installed) with these parts:
 
 `configs/olist_benchmark.json` is the config for the benchmark, with every warning acknowledged.
 
+### Mapping profiles
+
+A mapping profile is a small JSON file. It records which column in one source system's export holds each canonical field the engine expects, for one feed. Keep one file per source system and feed.
+
+1. On the first upload from a system, the engine suggests a mapping. You confirm or correct it on the Load page.
+2. Under **Save mapping profiles**, give the source system a name and download one profile per feed.
+3. On later runs, upload the profile with the new export, in the **Mapping profiles (optional)** box or through `draft_config(..., profiles=[...])`. If every column the profile names exists in the file, the mapping is reused exactly as saved, with no suggestions and nothing flagged. If any column is missing or renamed, the profile is skipped and the engine goes back to suggesting.
+
+```json
+{
+  "source_system": "acme-bank",
+  "feed": "bank",
+  "mapping": {
+    "txn_ref":       "Transaction ID",
+    "description":   "Narrative",
+    "credit_amount": "Credit (BRL)",
+    "fee_amount":    "Charges",
+    "net_amount":    "Net Credited",
+    "value_date":    "Value Dt"
+  }
+}
+```
+
+A profile answers:
+
+- **Which column is which?** For example, is the gross credit "Credit (BRL)" or "Net Credited"? A suggestion can pick the wrong one when two columns look alike; a profile settles it.
+- **Has the export format changed?** If the bank renames "Charges" to "Fees", the profile stops matching. The engine falls back to suggesting and flags anything it's unsure of, so the change can't produce a wrong mapping without you noticing.
+- **Is this run mapped the same way as the last one?** Reusing the profile keeps runs from the same system comparable.
+- **Where did a mapping come from?** The source-system name shows up as the reason for each mapped column (for example "profile 'acme-bank'").
+
+A profile stores column names only. Date format, delimiter and encoding stay in the run config's `feeds`.
+
 ## Health checks
 
 | Severity | Checks | Fix options |
