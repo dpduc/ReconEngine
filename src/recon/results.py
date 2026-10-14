@@ -10,7 +10,7 @@ import pandas as pd
 
 from recon.health import HealthReport, Issue
 from recon.ingest import parse_dates
-from recon.schema import AMOUNT_COLUMNS, DATE_COLUMNS, EXCEPTION, PRIMARY_KEYS, REVIEW
+from recon.schema import AMOUNT_COLUMNS, AUTO_ACCEPT, DATE_COLUMNS, EXCEPTION, PRIMARY_KEYS, REVIEW
 
 COMPLETED, BLOCKED = "completed", "blocked"
 EXCLUDED_COLUMNS = ("feed", "source_file", "source_row", "row_hash", "issue_id", "reason")
@@ -55,6 +55,28 @@ def exception_queue(results: pd.DataFrame, orphans: pd.DataFrame) -> pd.DataFram
     return queue[front + [c for c in queue.columns if c not in front]].reset_index(drop=True)
 
 
+# Auto-accepted with a note: the first records to revisit if the period does not close.
+NOTED_CODES = ("INSTALLMENT_INTEREST",)
+
+
+def close_watchlist(results: pd.DataFrame) -> pd.DataFrame:
+    """Auto-accepted units carrying a note, largest noted amount first, with that amount as `note_amount`."""
+    if results.empty or "reason_codes" not in results:
+        return pd.DataFrame(columns=["order_id", "reason_codes", "note_amount"])
+    has_note = results["reason_codes"].astype(str).str.split("|").map(lambda codes: bool(set(codes) & set(NOTED_CODES)))
+    noted = results[results["decision"].eq(AUTO_ACCEPT) & has_note]
+    noted = noted.assign(note_amount=pd.to_numeric(noted["credit_delta"], errors="coerce").round(2))
+    front = ["order_id", "reason_codes", "note_amount", "explanation"]
+    ordered = noted.sort_values(["note_amount", "order_id"], ascending=[False, True], kind="stable")
+    columns = [c for c in front if c in ordered] + [c for c in ordered.columns if c not in front]
+    return ordered[columns].reset_index(drop=True)
+
+
+def watchlist_summary(results: pd.DataFrame) -> dict[str, Any]:
+    watchlist = close_watchlist(results)
+    return {"units": int(len(watchlist)), "amount": round(float(watchlist["note_amount"].sum()), 2)}
+
+
 @dataclass(frozen=True)
 class ReconRun:
     status: str  # COMPLETED or BLOCKED
@@ -79,6 +101,10 @@ class ReconRun:
     def exception_queue(self) -> pd.DataFrame:
         return exception_queue(self.results, self.orphans)
 
+    @property
+    def close_watchlist(self) -> pd.DataFrame:
+        return close_watchlist(self.results)
+
     def bundle(self) -> dict[str, str]:
         """Downloadable artifacts keyed by file name."""
         return {
@@ -86,6 +112,7 @@ class ReconRun:
             "triage_queue.csv": self.results[self.results["decision"] == REVIEW].to_csv(index=False),
             "exception_queue.csv": self.exception_queue.to_csv(index=False),
             "orphans.csv": self.orphans.to_csv(index=False),
+            "close_watchlist.csv": self.close_watchlist.to_csv(index=False),
             "funnel.csv": self.funnel.to_csv(index=False),
             "excluded.csv": self.excluded.to_csv(index=False),
             "manifest.json": json.dumps(self.manifest, indent=2, default=str),

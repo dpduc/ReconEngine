@@ -18,7 +18,7 @@ import pandas as pd
 
 from recon.config import FeedSpec, RunConfig
 from recon.ingest import READERS, Sources, detect_delimiter, detect_encoding, read_source
-from recon.schema import CURRENCY, FEEDS, FILE_EXTENSIONS, REQUIRED_COLUMNS
+from recon.schema import CURRENCY, FEEDS, FILE_EXTENSIONS, INSTALLMENTS, INTEREST_AMOUNT, REQUIRED_COLUMNS
 
 # Header names other systems use for each canonical column.
 SYNONYMS: dict[str, tuple[str, ...]] = {
@@ -39,10 +39,13 @@ SYNONYMS: dict[str, tuple[str, ...]] = {
     "ship_fee": ("shipping fee", "freight", "delivery fee", "ship cost", "shipping"),
     "cod_fee": ("cod fee", "cod charge", "collection fee"),
     CURRENCY: ("ccy", "curr", "currency code", "currency iso", "moeda"),
+    INSTALLMENTS: ("installments", "installment count", "parcelas", "n installments", "payment installments"),
+    INTEREST_AMOUNT: ("interest", "interest amount", "installment interest", "juros", "finance charge"),
 }
 
 # Optional canonical columns: suggested only on a clear header match, never flagged when absent.
 OPTIONAL_COLUMNS: dict[str, tuple[str, ...]] = {feed: (CURRENCY,) for feed in FEEDS}
+OPTIONAL_COLUMNS["bank"] = (CURRENCY, INSTALLMENTS, INTEREST_AMOUNT)
 _CURRENCY_CODE = re.compile(r"[A-Za-z]{3}")
 
 # Value shapes each canonical column is expected to have.
@@ -150,7 +153,9 @@ def _optional(feed: str, canonical: str, sample: pd.DataFrame, taken: set[str]) 
     best = max(free, key=lambda s: _name_score(canonical, s), default=None)
     if best is not None and _name_score(canonical, best) >= 0.8:
         values = sample[best][sample[best].str.strip() != ""]
-        if canonical != CURRENCY or (not values.empty and values.str.strip().str.fullmatch(_CURRENCY_CODE).all()):
+        numeric = not values.empty and pd.to_numeric(values, errors="coerce").notna().all()
+        codes = not values.empty and values.str.strip().str.fullmatch(_CURRENCY_CODE).all()
+        if codes if canonical == CURRENCY else numeric:
             return Suggestion(feed, canonical, best, round(_name_score(canonical, best), 3), False,
                               "optional; header match")
     return Suggestion(feed, canonical, None, 0.0, False, "optional; no matching column")

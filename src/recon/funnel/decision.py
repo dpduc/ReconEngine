@@ -16,6 +16,8 @@ def decision(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
     confidence = units["tracking_consistent"].map({True: TIE_OUT_CONFIDENCE, False: EXCEPTION_CONFIDENCE}).astype(float)
     three_way = units["bank_found"] & units["shipment_found"]
     reasons = three_way.map({True: "THREE_WAY_TIE_OUT", False: "TIE_OUT_PER_STATUS_POLICY"}).astype(object)
+    if "interest_explained" in units:  # ties out once the stated installment interest is taken into account
+        reasons = reasons.where(~units["interest_explained"].astype(bool), "INSTALLMENT_INTEREST")
     accept = confidence >= ctx.policy.accept_threshold
     decided = pd.concat([
         decide(units[accept], AUTO_ACCEPT, confidence[accept], reasons[accept]),

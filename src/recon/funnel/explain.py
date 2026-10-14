@@ -54,6 +54,26 @@ def _conversion(row: Row) -> str | None:
             f"at {rate:.6g} ({_value(row, 'fx_rate_source')}, {_value(row, 'fx_rate_date')}).")
 
 
+def _installments(row: Row) -> str:
+    count = _value(row, "installments") or _value(row, "installments_bank")
+    return f"{int(count)} installments" if count else "installments"
+
+
+def _installment_interest(row: Row) -> str:
+    delta = _value(row, "credit_delta") or 0.0
+    return (f"The bank credit is {delta:,.2f} more than the order amount, matching the installment interest the "
+            f"statement reports on {_installments(row)}; auto-accepted with a note. "
+            "Revisit first if the period does not close.")
+
+
+def _possible_interest(row: Row) -> str:
+    delta, expected = _value(row, "credit_delta") or 0.0, _value(row, "expected_credit")
+    share = f" ({delta / abs(expected):.1%})" if expected else ""
+    return (f"The bank credit is {delta:,.2f}{share} more than the order amount on a payment in "
+            f"{_installments(row)}. This may be installment interest, but the statement does not report "
+            "interest, so a reviewer confirms it.")
+
+
 def _status(row: Row) -> str:
     status = _value(row, "order_status")
     return f"'{status}'" if status else "(blank)"
@@ -76,6 +96,8 @@ SENTENCES: dict[str, Callable[[Row], str]] = {
         f"Order status {_status(row)} has no evidence policy yet; a business decision is needed."),
     "MISSING_PAYMENT": lambda row: "No bank credit found for this order.",
     "CURRENCY_MISMATCH": _currency_mismatch,
+    "INSTALLMENT_INTEREST": _installment_interest,
+    "POSSIBLE_INSTALLMENT_INTEREST": _possible_interest,
     "FX_DIFFERENCE": _fx_difference,
     "AMOUNT_MISMATCH": _amount_mismatch,
     "MISSING_SHIPMENT": lambda row: "No shipment found for this order.",
@@ -100,7 +122,8 @@ def _sentence(code: str, row: Row) -> str:
 # Columns the sentences read; everything else is irrelevant to the explanation.
 COLUMNS = ("reason_codes", "confidence", "payment_method", "order_status", "credit_delta", "cod_amount_delta",
            "fee_delta", "cod_fee_delta", "link_candidates", "currency_oms", "currency_bank",
-           "expected_credit", "fx_rate", "fx_rate_source", "fx_rate_date", "fx_converted", "fx_rate_missing")
+           "expected_credit", "fx_rate", "fx_rate_source", "fx_rate_date", "fx_converted", "fx_rate_missing",
+           "installments", "installments_bank")
 
 
 def explain_all(frame: pd.DataFrame) -> list[str]:

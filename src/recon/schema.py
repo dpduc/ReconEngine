@@ -34,6 +34,9 @@ LINEAGE_COLUMNS = (SOURCE_FILE, SOURCE_ROW, ROW_HASH, INGESTED_AT)
 
 # Optional canonical currency column (any feed); one currency per feed is required.
 CURRENCY = "currency"
+# Optional bank columns: number of installments, and the interest the statement says the credit includes.
+INSTALLMENTS = "installments"
+INTEREST_AMOUNT = "interest_amount"
 
 # Optional OMS column the status policy is keyed on.
 ORDER_STATUS = "order_status"
