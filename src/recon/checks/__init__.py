@@ -56,4 +56,4 @@ def warning(issue_id: str, check: str, feed: str, frame: pd.DataFrame, mask: pd.
 
 from recon.checks import columns  # noqa: E402,F401  (registers checks)
 from recon.checks import integrity  # noqa: E402,F401
-from recon.checks import amounts, coverage, events, policy  # noqa: E402,F401  (warning checks)
+from recon.checks import amounts, coverage, currency, events, policy  # noqa: E402,F401  (warning checks)

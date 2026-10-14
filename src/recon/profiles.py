@@ -12,7 +12,7 @@ import pandas as pd
 
 from recon.ingest import parse_dates
 from recon.config import RunConfig
-from recon.schema import NUMERIC_COLUMNS, ORDER_STATUS
+from recon.schema import CURRENCY, NUMERIC_COLUMNS, ORDER_STATUS
 
 Profile = Callable[[dict[str, pd.DataFrame], RunConfig], Any]
 
@@ -54,6 +54,17 @@ def order_status_mix(feeds: dict[str, pd.DataFrame], config: RunConfig) -> dict[
         return None
     counts = oms[ORDER_STATUS].fillna("<missing>").value_counts()
     return {str(status): int(n) for status, n in counts.items()}
+
+
+@profile("currency_mix")
+def currency_mix(feeds: dict[str, pd.DataFrame], config: RunConfig) -> dict[str, dict[str, int]] | None:
+    """Rows per currency code in each feed that carries one; feeds may mix currencies."""
+    out = {}
+    for feed, frame in feeds.items():
+        if CURRENCY in frame.columns:
+            codes = frame[CURRENCY].astype("string").str.strip().str.upper().fillna("<missing>")
+            out[feed] = {str(code): int(n) for code, n in codes.value_counts().items()}
+    return out or None
 
 
 @profile("value_date_lag_days")

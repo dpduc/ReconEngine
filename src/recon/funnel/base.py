@@ -17,7 +17,7 @@ from recon.funnel.explain import explain_all
 from recon.ingest import parse_dates
 from recon.schema import INGESTED_AT, LINEAGE_COLUMNS
 
-RULE_VERSION = "1.3.0"  # bump whenever funnel logic changes
+RULE_VERSION = "1.4.0"  # bump whenever funnel logic changes
 
 HASH_COLUMNS = ("oms_row_hash", "bank_row_hash", "logistics_row_hash")
 

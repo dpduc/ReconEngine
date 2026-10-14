@@ -28,6 +28,14 @@ def _amount_mismatch(row: Row) -> str:
     return sentence
 
 
+def _currency_mismatch(row: Row) -> str:
+    credit, order = _value(row, "currency_bank"), _value(row, "currency_oms")
+    if credit and order:
+        return (f"The bank credit is in {credit} but the order is in {order}; "
+                "amounts in different currencies are not compared.")
+    return "The bank credit and the order are in different currencies; amounts are not compared."
+
+
 def _status(row: Row) -> str:
     status = _value(row, "order_status")
     return f"'{status}'" if status else "(blank)"
@@ -49,6 +57,7 @@ SENTENCES: dict[str, Callable[[Row], str]] = {
     "ORDER_STATUS_REQUIRES_POLICY": lambda row: (
         f"Order status {_status(row)} has no evidence policy yet; a business decision is needed."),
     "MISSING_PAYMENT": lambda row: "No bank credit found for this order.",
+    "CURRENCY_MISMATCH": _currency_mismatch,
     "AMOUNT_MISMATCH": _amount_mismatch,
     "MISSING_SHIPMENT": lambda row: "No shipment found for this order.",
     "FEE_MISMATCH": lambda row: _difference("The bank fee", _value(row, "fee_delta"), "the contract MDR"),
@@ -71,7 +80,7 @@ def _sentence(code: str, row: Row) -> str:
 
 # Columns the sentences read; everything else is irrelevant to the explanation.
 COLUMNS = ("reason_codes", "confidence", "payment_method", "order_status", "credit_delta", "cod_amount_delta",
-           "fee_delta", "cod_fee_delta", "link_candidates")
+           "fee_delta", "cod_fee_delta", "link_candidates", "currency_oms", "currency_bank")
 
 
 def explain_all(frame: pd.DataFrame) -> list[str]:

@@ -13,6 +13,7 @@ import pandas as pd
 from recon.contracts import fee
 from recon.funnel.base import FunnelContext, FunnelStep, StepOutcome, cod_remittance, split
 from recon.funnel.reasons import exception
+from recon.schema import CURRENCY
 
 
 def _within(delta: pd.Series, tolerance: float) -> pd.Series:
@@ -46,6 +47,12 @@ def _measure(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     )
     out["fee_within_tolerance"] = _within(out["fee_delta"], policy.amount_tolerance)
     out["cod_fee_within_tolerance"] = _within(out["cod_fee_delta"], policy.amount_tolerance)
+    # Linked order and credit both carry a currency (columns suffixed on the join); compare like for like.
+    oms_ccy, bank_ccy = f"{CURRENCY}_oms", f"{CURRENCY}_bank"
+    out["currency_ok"] = True
+    if oms_ccy in out and bank_ccy in out:
+        codes = [out[c].astype("string").str.strip().str.upper() for c in (oms_ccy, bank_ccy)]
+        out["currency_ok"] = ~(codes[0].notna() & codes[1].notna() & codes[0].ne(codes[1])).fillna(False)
     out["timing_ok"] = True
     if "picked_at" in out and "delivered_at" in out:
         picked = ctx.dates("logistics", out["picked_at"])
@@ -68,6 +75,7 @@ def _rule(reason: str, fails: Callable[[pd.DataFrame], pd.Series]):
 
 RULE_STEPS: list[FunnelStep] = [
     FunnelStep("missing_payment", _rule("MISSING_PAYMENT", lambda u: u["requires_payment"] & ~u["bank_found"])),
+    FunnelStep("currency_mismatch", _rule("CURRENCY_MISMATCH", lambda u: u["bank_found"] & ~u["currency_ok"])),
     FunnelStep("amount_mismatch", _rule("AMOUNT_MISMATCH", lambda u: u["bank_found"] & ~u["amount_within_tolerance"])),
     FunnelStep("missing_shipment", _rule("MISSING_SHIPMENT",
                                          lambda u: u["requires_shipment"] & ~u["shipment_found"])),

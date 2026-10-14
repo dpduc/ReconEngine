@@ -119,11 +119,13 @@ A profile stores column names only. Date format, delimiter and encoding stay in 
 
 | Severity | Checks | Fix options |
 |---|---|---|
-| Blocking | missing required column, values that fail type or date parsing, duplicate primary keys, mixed currencies within a feed | remap a column, set the date format, choose a duplicate strategy (keep first / keep latest / route to review), exclude rows with a reason |
-| Warning | missing or zero amounts, coverage gaps, picked up after delivered, placeholder 00:00:00 timestamps, amount outliers, order statuses not covered by the status policy | acknowledge with a note, or set the status policy |
-| Info | amount distributions, order-status mix, txn → value-date lag percentiles | none |
+| Blocking | missing required column, values that fail type or date parsing, duplicate primary keys | remap a column, set the date format, choose a duplicate strategy (keep first / keep latest / route to review), exclude rows with a reason |
+| Warning | missing or zero amounts, coverage gaps, picked up after delivered, placeholder 00:00:00 timestamps, amount outliers, order statuses not covered by the status policy, bank credits in another currency than their order | acknowledge with a note, set the status policy; for currency mismatches: correct the currency code, route to review, or exclude as a last resort |
+| Info | amount distributions, order-status mix, currency mix per feed, txn → value-date lag percentiles | none |
 
 Excluded rows are never dropped silently. They are reported in the run as a separate category, with their reason.
+
+A feed may mix currencies. Each linked order and credit are compared in their own currency, and a credit whose currency differs from its order's is never compared as if it were the same currency: it becomes `CURRENCY_MISMATCH`.
 
 ## The funnel
 
@@ -140,7 +142,7 @@ missing shipments.
 | 4 | `link_constrained` | links on same currency, amount within tolerance and date within the window. Never auto-matches when several candidates qualify |
 | 5 | `link_candidates` | REVIEW with `LINK_CANDIDATES`: proposes candidates with a confidence score, never auto-accepted |
 | 6 | `route_review` | REVIEW: duplicate keys whose strategy is "route to review" |
-| 7 | rule checks | `MISSING_PAYMENT` → `AMOUNT_MISMATCH` → `MISSING_SHIPMENT` → fee / COD fee → `TIMING_MISMATCH` |
+| 7 | rule checks | `MISSING_PAYMENT` → `CURRENCY_MISMATCH` → `AMOUNT_MISMATCH` → `MISSING_SHIPMENT` → fee / COD fee → `TIMING_MISMATCH` |
 | 8 | `decision` | `AUTO_ACCEPT` |
 | 9 | `reverse_pass` | `ORPHAN_PAYMENT` / `ORPHAN_SHIPMENT`: bank or 3PL records that link to no order |
 

@@ -153,21 +153,12 @@ def test_single_currency_feed_is_clean(tmp_path):
     assert inspect(tmp_path, config).gate_open
 
 
-def test_mixed_currencies_block_without_conversion(tmp_path):
+def test_several_currencies_in_one_feed_do_not_block(tmp_path):
+    # Like-for-like comparison per linked pair (see test_currency); the mix is only profiled.
     config = write_sources(tmp_path, bank=CURRENCY_BANK)
-    issue = only_issue(inspect(tmp_path, config), "mixed_currency")
-    assert issue.feed == "bank"
-    assert run(tmp_path, config).blocked
-    assert all(o.id == "exclude_rows" for o in issue.fix_options)  # no conversion offered
-
-    [keep_brl] = [o for o in issue.fix_options if o.params["source_rows"] == [2]]
-    config = resolve(config, issue, "exclude_rows",
-                     **{**keep_brl.params, "reason": "USD payment, out of scope"})
-    outcome = run(tmp_path, config)
-    assert not outcome.blocked
-    assert outcome.excluded["reason"].tolist() == ["USD payment, out of scope"]
-    payment = outcome.results.set_index("order_id").loc["ORD2024-0000002"]
-    assert payment["reason_codes"].startswith("MISSING_PAYMENT")
+    report = inspect(tmp_path, config)
+    assert not report.blocking_issues
+    assert report.profiles["currency_mix"]["bank"] == {"BRL": 1, "USD": 1}
 
 
 def test_feed_spec_date_format_is_honoured(tmp_path):
