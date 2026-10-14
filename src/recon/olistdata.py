@@ -16,7 +16,13 @@ from pathlib import Path
 import pandas as pd
 
 
-def generate_from_olist(source_dir: str | Path, out_dir: str | Path, *, seed: int = 42, rows: int = 25_000) -> dict:
+def generate_from_olist(
+    source_dir: str | Path,
+    out_dir: str | Path,
+    *,
+    seed: int = 42,
+    rows: int | None = None,
+) -> dict:
     source_dir, out_dir = Path(source_dir), Path(out_dir)
     orders = pd.read_csv(source_dir / "olist_orders_dataset.csv", parse_dates=[
         "order_purchase_timestamp", "order_approved_at",
@@ -24,21 +30,20 @@ def generate_from_olist(source_dir: str | Path, out_dir: str | Path, *, seed: in
     ])
     items = pd.read_csv(source_dir / "olist_order_items_dataset.csv")
     payments = pd.read_csv(source_dir / "olist_order_payments_dataset.csv")
-    eligible = orders[orders["order_status"].isin(["delivered", "shipped"])].copy()
     item_totals = items.groupby("order_id", as_index=False).agg(
         item_total=("price", "sum"), freight_total=("freight_value", "sum")
     )
     payment_totals = payments.groupby("order_id", as_index=False).agg(
         payment_total=("payment_value", "sum")
     )
-    eligible = eligible.merge(item_totals, on="order_id", how="inner")
-    eligible = eligible.merge(payment_totals, on="order_id", how="inner")
-    eligible = eligible.dropna(subset=["item_total", "freight_total", "payment_total"])
+    eligible = orders.merge(item_totals, on="order_id", how="left")
+    eligible = eligible.merge(payment_totals, on="order_id", how="left")
     eligible["order_amount"] = (eligible["item_total"] + eligible["freight_total"]).round(2)
-    # Start from real rows whose Olist payment and item economics already tie
-    # out; controlled mutations then create a diagnosable benchmark.
-    eligible = eligible[(eligible["payment_total"] - eligible["order_amount"]).abs() <= 0.01]
-    eligible = eligible.sort_values(["order_purchase_timestamp", "order_id"]).head(rows).copy()
+    eligible = eligible.sort_values(["order_purchase_timestamp", "order_id"]).copy()
+    if rows is not None:
+        if rows < 1:
+            raise ValueError("rows must be positive when provided")
+        eligible = eligible.head(rows)
     rng = random.Random(seed)
 
     truth_rows: list[dict] = []
@@ -47,23 +52,32 @@ def generate_from_olist(source_dir: str | Path, out_dir: str | Path, *, seed: in
     logistics_rows: list[dict] = []
     for unit_id, row in enumerate(eligible.itertuples(index=False), start=1):
         order_id = row.order_id
-        amount = float(row.order_amount)
-        payment = float(row.payment_total)
+        amount = float(row.order_amount) if pd.notna(row.order_amount) else None
+        payment = float(row.payment_total) if pd.notna(row.payment_total) else None
         scenario = "MATCHED"
         expected_outcome = "PASS_1"
         expected_exception = ""
         has_payment = True
-        has_shipment = True
-        draw = rng.random()
-        if draw < 0.01:
-            payment += round(max(1.0, amount * 0.05), 2)
-            scenario, expected_outcome, expected_exception = "AMOUNT_ERROR", "EXCEPTION", "AMOUNT_MISMATCH"
-        elif draw < 0.015:
-            has_payment = False
-            scenario, expected_outcome, expected_exception = "MISSING_PAYMENT", "EXCEPTION", "MISSING_PAYMENT"
-        elif draw < 0.02:
-            has_shipment = False
-            scenario, expected_outcome, expected_exception = "MISSING_SHIPMENT", "EXCEPTION", "MISSING_SHIPMENT"
+        has_shipment = row.order_status in {"delivered", "shipped"}
+        if amount is None or payment is None:
+            scenario = "INCOMPLETE_SOURCE"
+            expected_outcome = "REVIEW"
+            expected_exception = "MISSING_SOURCE_EVIDENCE"
+        elif row.order_status not in {"delivered", "shipped"}:
+            scenario = "STATUS_PENDING_POLICY"
+            expected_outcome = "REVIEW"
+            expected_exception = "ORDER_STATUS_REQUIRES_POLICY"
+        else:
+            draw = rng.random()
+            if draw < 0.01:
+                payment += round(max(1.0, amount * 0.05), 2)
+                scenario, expected_outcome, expected_exception = "AMOUNT_ERROR", "EXCEPTION", "AMOUNT_MISMATCH"
+            elif draw < 0.015:
+                has_payment = False
+                scenario, expected_outcome, expected_exception = "MISSING_PAYMENT", "EXCEPTION", "MISSING_PAYMENT"
+            elif draw < 0.02:
+                has_shipment = False
+                scenario, expected_outcome, expected_exception = "MISSING_SHIPMENT", "EXCEPTION", "MISSING_SHIPMENT"
         tracking = f"OLIST-{order_id}"
         ordered_at = row.order_purchase_timestamp.isoformat()
         delivered_at = row.order_delivered_customer_date
@@ -75,7 +89,7 @@ def generate_from_olist(source_dir: str | Path, out_dir: str | Path, *, seed: in
             "currency": "BRL", "order_amount": amount,
             "order_status": row.order_status, "ordered_at": ordered_at,
         })
-        if has_payment:
+        if has_payment and payment is not None:
             bank_rows.append({
                 "txn_ref": f"OLIST-PAY-{order_id}", "txn_date": ordered_at,
                 "value_date": pd.Timestamp(row.order_approved_at).date().isoformat()
@@ -88,7 +102,8 @@ def generate_from_olist(source_dir: str | Path, out_dir: str | Path, *, seed: in
             logistics_rows.append({
                 "tracking_code": tracking, "client_order_code": order_id,
                 "status": "DELIVERED" if row.order_status == "delivered" else "SHIPPED",
-                "cod_collected": 0.0, "ship_fee": float(row.freight_total),
+                "currency": "BRL",
+                "cod_collected": 0.0, "ship_fee": float(row.freight_total) if pd.notna(row.freight_total) else None,
                 "cod_fee": 0.0, "remittance_id": f"OLIST-SHIP-{order_id}",
                 "picked_at": pd.Timestamp(row.order_delivered_carrier_date).isoformat()
                 if not pd.isna(row.order_delivered_carrier_date) else "",
@@ -116,10 +131,11 @@ def generate_from_olist(source_dir: str | Path, out_dir: str | Path, *, seed: in
         files[name] = {"rows": len(frame), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
     manifest = {
         "generator": "recon.olistdata",
-        "generator_version": "1.0.0",
+        "generator_version": "1.1.0",
         "source": "brazil ecom",
         "source_files": ["olist_orders_dataset.csv", "olist_order_items_dataset.csv", "olist_order_payments_dataset.csv"],
         "seed": seed, "units": len(truth_rows), "currency": "BRL",
+        "source_status_counts": orders["order_status"].value_counts().sort_index().to_dict(),
         "scenario_counts": pd.Series([r["scenario"] for r in truth_rows]).value_counts().to_dict(),
         "files": files,
     }
@@ -131,7 +147,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", default="brazil ecom")
     parser.add_argument("--out", default="data/generated")
-    parser.add_argument("--rows", type=int, default=25_000)
+    parser.add_argument("--rows", type=int, default=None, help="optional row cap; default keeps every source order")
     parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
     print(generate_from_olist(args.source, args.out, rows=args.rows, seed=args.seed))

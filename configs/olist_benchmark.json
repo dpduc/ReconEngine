@@ -1,0 +1,58 @@
+{
+  "feeds": {
+    "oms": {"path": "oms_orders.csv", "format": "csv", "encoding": "utf-8", "date_format": null},
+    "bank": {"path": "bank_statement.csv", "format": "csv", "encoding": "utf-8", "date_format": null},
+    "logistics": {"path": "logistics_report.csv", "format": "csv", "encoding": "utf-8", "date_format": null}
+  },
+  "mapping": {
+    "oms": {
+      "order_id": "order_id", "tracking_no": "tracking_no", "payment_method": "payment_method",
+      "order_amount": "order_amount", "ordered_at": "ordered_at"
+    },
+    "bank": {
+      "txn_ref": "txn_ref", "description": "description", "credit_amount": "credit_amount",
+      "fee_amount": "fee_amount", "net_amount": "net_amount", "value_date": "value_date"
+    },
+    "logistics": {
+      "tracking_code": "tracking_code", "client_order_code": "client_order_code",
+      "cod_collected": "cod_collected", "ship_fee": "ship_fee", "cod_fee": "cod_fee"
+    }
+  },
+  "policy": {
+    "mdr_bps": 0, "cod_fee_bps": 0, "amount_tolerance": 0.01,
+    "status_policy": {"delivered": ["payment", "shipment"], "shipped": ["payment", "shipment"]}
+  },
+  "resolutions": [
+    {"issue_id": "missing_amount:oms:order_amount", "option": "acknowledge", "params": {},
+     "note": "Olist orders with no items (mostly unavailable/canceled); the funnel decides them as EXCEPTION(MISSING_SOURCE_EVIDENCE), not REVIEW, keeping the review rate under 1%."},
+    {"issue_id": "missing_amount:logistics:ship_fee", "option": "acknowledge", "params": {},
+     "note": "One shipment without a freight total in the Olist items table; all orders are prepaid, so ship_fee does not enter the COD remittance check."},
+    {"issue_id": "zero_amount:bank:credit_amount", "option": "acknowledge", "params": {},
+     "note": "Three Olist payments recorded with payment_value = 0; kept so the matcher can flag the amount gap."},
+    {"issue_id": "amount_outlier:oms:order_amount", "option": "acknowledge", "params": {},
+     "note": "Long right tail of genuine Olist basket values, not entry errors."},
+    {"issue_id": "amount_outlier:bank:credit_amount", "option": "acknowledge", "params": {},
+     "note": "Payments mirror the order-value tail."},
+    {"issue_id": "coverage:oms:no_payment", "option": "acknowledge", "params": {},
+     "note": "Benchmark scenarios MISSING_PAYMENT plus orders without payment rows in Olist."},
+    {"issue_id": "coverage:oms:no_shipment", "option": "acknowledge", "params": {},
+     "note": "Benchmark scenario MISSING_SHIPMENT plus undelivered/canceled orders that never shipped."},
+    {"issue_id": "picked_after_delivered:logistics", "option": "acknowledge", "params": {},
+     "note": "Olist source has carrier dates after customer delivery dates; the funnel's timing check decides them as EXCEPTION(TIMING_MISMATCH)."},
+    {"issue_id": "status_not_in_policy:approved", "option": "acknowledge", "params": {},
+     "note": "Benchmark scenario STATUS_PENDING_POLICY: undelivered Olist statuses stay EXCEPTION(ORDER_STATUS_REQUIRES_POLICY)."},
+    {"issue_id": "status_not_in_policy:canceled", "option": "acknowledge", "params": {},
+     "note": "Benchmark scenario STATUS_PENDING_POLICY: undelivered Olist statuses stay EXCEPTION(ORDER_STATUS_REQUIRES_POLICY)."},
+    {"issue_id": "status_not_in_policy:created", "option": "acknowledge", "params": {},
+     "note": "Benchmark scenario STATUS_PENDING_POLICY: undelivered Olist statuses stay EXCEPTION(ORDER_STATUS_REQUIRES_POLICY)."},
+    {"issue_id": "status_not_in_policy:invoiced", "option": "acknowledge", "params": {},
+     "note": "Benchmark scenario STATUS_PENDING_POLICY: undelivered Olist statuses stay EXCEPTION(ORDER_STATUS_REQUIRES_POLICY)."},
+    {"issue_id": "status_not_in_policy:processing", "option": "acknowledge", "params": {},
+     "note": "Benchmark scenario STATUS_PENDING_POLICY: undelivered Olist statuses stay EXCEPTION(ORDER_STATUS_REQUIRES_POLICY)."},
+    {"issue_id": "status_not_in_policy:unavailable", "option": "acknowledge", "params": {},
+     "note": "Benchmark scenario STATUS_PENDING_POLICY: undelivered Olist statuses stay EXCEPTION(ORDER_STATUS_REQUIRES_POLICY)."},
+    {"issue_id": "placeholder_timestamp:logistics:delivered_at:status=SHIPPED", "option": "acknowledge", "params": {},
+     "note": "Shipped-not-delivered rows carry the estimated delivery date at 00:00:00, not a real delivery event."}
+  ],
+  "ground_truth": "ground_truth.csv"
+}
