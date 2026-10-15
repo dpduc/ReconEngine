@@ -14,7 +14,7 @@ from recon.contracts import fee
 from recon.funnel.base import FunnelContext, FunnelStep, StepOutcome, cod_remittance, decide, split
 from recon.funnel.fx import lookup_rates
 from recon.funnel.reasons import exception
-from recon.schema import CURRENCY, INSTALLMENTS, INTEREST_AMOUNT, REVIEW
+from recon.schema import CURRENCY, INSTALLMENTS, INTEREST_AMOUNT, PAYMENT_TYPE, REVIEW
 
 
 def _within(delta: pd.Series, tolerance: float) -> pd.Series:
@@ -38,9 +38,9 @@ def _measure(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     out["expected_credit"] = out["order_amount"].fillna(0).where(out["payment_method"].eq("PREPAID"),
                                                                  cod_remittance(out))
     out["credit_delta"] = out["credit_amount"].fillna(0) - out["expected_credit"]
-    out["expected_mdr"] = out["credit_amount"].fillna(0).where(
-        out["payment_method"].eq("PREPAID"), 0
-    ).map(lambda x: fee(int(x), policy.mdr_bps))
+    out["fee_bps"] = _fee_bps(out, ctx)
+    prepaid_credit = out["credit_amount"].fillna(0).where(out["payment_method"].eq("PREPAID"), 0)
+    out["expected_mdr"] = [fee(int(x), bps) for x, bps in zip(prepaid_credit, out["fee_bps"])]
     out["expected_cod_fee"] = out["cod_collected"].fillna(0).map(lambda x: fee(int(x), policy.cod_fee_bps))
     out["fee_delta"] = out["fee_amount"].fillna(0) - out["expected_mdr"]
     out["cod_fee_delta"] = out["cod_fee"].fillna(0) - out["expected_cod_fee"]
@@ -61,6 +61,16 @@ def _measure(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     # A unit reaching the decision passed every check; a linked shipment must also agree on tracking number.
     out["tracking_consistent"] = ~out["shipment_found"] | out["tracking_exact"]
     return out
+
+
+def _fee_bps(out: pd.DataFrame, ctx: FunnelContext) -> list[int]:
+    """Each unit's fee rate, picked by the linked credit's payment type (`mdr_bps` without one)."""
+    policy = ctx.policy
+    bank = ctx.feeds.get("bank")
+    if not policy.payment_type_fee_bps or bank is None or PAYMENT_TYPE not in bank:
+        return [policy.mdr_bps] * len(out)
+    name = f"{PAYMENT_TYPE}_bank" if f"{PAYMENT_TYPE}_bank" in out else PAYMENT_TYPE
+    return [policy.fee_bps(kind) for kind in out[name].fillna("").astype(str).str.strip()]
 
 
 def _bank_number(out: pd.DataFrame, column: str) -> pd.Series | None:

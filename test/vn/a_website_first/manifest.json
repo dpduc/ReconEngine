@@ -1,6 +1,6 @@
 {
   "generator": "recon.channeldata",
-  "generator_version": "2.1.0",
+  "generator_version": "2.2.0",
   "market": "vn",
   "source": "brazil ecom",
   "source_files": [
@@ -158,11 +158,11 @@
     "status": "COMPLETED",
     "warnings_acknowledged": 9,
     "decisions": {
-      "EXCEPTION": 506,
-      "AUTO_ACCEPT": 78,
+      "EXCEPTION": 392,
+      "AUTO_ACCEPT": 192,
       "REVIEW": 22
     },
-    "accuracy": 0.19306930693069307,
+    "accuracy": 0.3811881188118812,
     "auto_accept_precision": 1.0,
     "orphans": 172,
     "links": {

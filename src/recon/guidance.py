@@ -213,6 +213,15 @@ def _currency_mismatch(issue: Issue) -> Guidance:
             "currency wrongly; convert if treasury gives you exchange rates.")
 
 
+def _payment_type_without_fee_rate(issue: Issue) -> Guidance:
+    return Guidance(
+        meaning=f"{issue.affected_rows:,} bank credit(s) have a payment type the policy gives no fee rate.",
+        next_step="Their fee is checked at the fallback MDR; if the real rate differs they become FEE_MISMATCH.",
+        needs_decision=False, recommended=_option(issue, ACKNOWLEDGE),
+        why="Acknowledge if the fallback is the right rate for this payment type; otherwise add its rate to "
+            "the policy's payment_type_fee_bps and inspect again.")
+
+
 GUIDES: dict[str, Callable[[Issue], Guidance]] = {
     "missing_required_column": _missing_column,
     "unparseable_value": _unparseable_value,
@@ -226,6 +235,7 @@ GUIDES: dict[str, Callable[[Issue], Guidance]] = {
     "placeholder_timestamp": _placeholder_timestamp,
     "status_not_in_policy": _status_not_in_policy,
     "currency_mismatch": _currency_mismatch,
+    "payment_type_without_fee_rate": _payment_type_without_fee_rate,
 }
 
 

@@ -20,6 +20,11 @@ def _difference(subject: str, delta: Any, reference: str) -> str:
     return f"{subject} is {abs(delta):,.2f} {'more' if delta > 0 else 'less'} than {reference}."
 
 
+def _fee_rate(row: Row) -> str:
+    bps = _value(row, "fee_bps")
+    return "the contract MDR" if bps is None else f"the contract fee ({bps / 100:.2f}%)"
+
+
 def _amount_mismatch(row: Row) -> str:
     sentence = _difference("The bank credit", _value(row, "credit_delta"), "expected")
     cod_delta = _value(row, "cod_amount_delta")
@@ -101,7 +106,7 @@ SENTENCES: dict[str, Callable[[Row], str]] = {
     "FX_DIFFERENCE": _fx_difference,
     "AMOUNT_MISMATCH": _amount_mismatch,
     "MISSING_SHIPMENT": lambda row: "No shipment found for this order.",
-    "FEE_MISMATCH": lambda row: _difference("The bank fee", _value(row, "fee_delta"), "the contract MDR"),
+    "FEE_MISMATCH": lambda row: _difference("The bank fee", _value(row, "fee_delta"), _fee_rate(row)),
     "COD_FEE_MISMATCH": lambda row: _difference("The COD fee", _value(row, "cod_fee_delta"), "the contract fee"),
     "TIMING_MISMATCH": lambda row: "The shipment was picked up after it was delivered.",
     "LINK_CANDIDATES": _candidates,
@@ -121,7 +126,7 @@ def _sentence(code: str, row: Row) -> str:
 
 # Columns the sentences read; everything else is irrelevant to the explanation.
 COLUMNS = ("reason_codes", "confidence", "payment_method", "order_status", "credit_delta", "cod_amount_delta",
-           "fee_delta", "cod_fee_delta", "link_candidates", "currency_oms", "currency_bank",
+           "fee_delta", "fee_bps", "cod_fee_delta", "link_candidates", "currency_oms", "currency_bank",
            "expected_credit", "fx_rate", "fx_rate_source", "fx_rate_date", "fx_converted", "fx_rate_missing",
            "installments", "installments_bank")
 

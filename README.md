@@ -78,7 +78,7 @@ A run config is a JSON file (or YAML, if PyYAML is installed) with these parts:
 
 - `feeds`: path, format, encoding, date format and delimiter for each feed.
 - `mapping`: canonical column → source column, for each feed.
-- `policy`: absolute amount tolerance (default 0.01), date window for linking (default ±4 days), fee rates, a `status_policy` that says which order statuses need payment and/or shipment evidence, and an optional `fx` setting (see [Currencies and FX](#currencies-and-fx)).
+- `policy`: absolute amount tolerance (default 0.01), date window for linking (default ±4 days), fee rates (`mdr_bps`, overridden per bank `payment_type` by `payment_type_fee_bps`, e.g. `{"bank_transfer": 0, "wallet": 110}`), a `status_policy` that says which order statuses need payment and/or shipment evidence, and an optional `fx` setting (see [Currencies and FX](#currencies-and-fx)).
 - `resolutions`: the fixes and acknowledgements recorded in the Fix step.
 - `ground_truth`: optional. When set, precision and recall are reported for each reason code.
 
@@ -121,7 +121,7 @@ A profile stores column names only. Date format, delimiter and encoding stay in 
 | Severity | Checks | Fix options |
 |---|---|---|
 | Blocking | missing required column, values that fail type or date parsing, duplicate primary keys | remap a column, set the date format, choose a duplicate strategy (keep first / keep latest / route to review), exclude rows with a reason |
-| Warning | missing or zero amounts, coverage gaps, picked up after delivered, placeholder 00:00:00 timestamps, amount outliers, order statuses not covered by the status policy, bank credits in another currency than their order | acknowledge with a note, set the status policy; for currency mismatches: convert using a rate source, correct the currency code, route to review, or exclude as a last resort |
+| Warning | missing or zero amounts, coverage gaps, picked up after delivered, placeholder 00:00:00 timestamps, amount outliers, order statuses not covered by the status policy, bank payment types with no fee rate (when rates per payment type are set), bank credits in another currency than their order | acknowledge with a note, set the status policy; for currency mismatches: convert using a rate source, correct the currency code, route to review, or exclude as a last resort |
 | Info | amount distributions, order-status mix, currency mix per feed, txn → value-date lag percentiles | none |
 
 Excluded rows are never dropped silently. They are reported in the run as a separate category, with their reason.

@@ -45,6 +45,10 @@
   },
   "policy": {
     "mdr_bps": 110,
+    "payment_type_fee_bps": {
+      "bank_transfer": 0,
+      "wallet": 110
+    },
     "cod_fee_bps": 80,
     "amount_tolerance": 1000,
     "status_policy": {

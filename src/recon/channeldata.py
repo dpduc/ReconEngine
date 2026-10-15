@@ -42,7 +42,7 @@ import pandas as pd
 
 from recon.contracts import fee as vnd_fee
 
-GENERATOR_VERSION = "2.1.0"
+GENERATOR_VERSION = "2.2.0"
 SOURCE_FILES = ("olist_orders_dataset.csv", "olist_order_items_dataset.csv", "olist_order_payments_dataset.csv")
 DATE_SHIFT = pd.Timedelta(days=2926)  # 418 weeks: weekdays kept, Black Friday 2017 -> Black Friday 2025
 DATE_COLUMNS = ("order_purchase_timestamp", "order_approved_at", "order_delivered_carrier_date",
@@ -856,7 +856,9 @@ class Market:
 
 MARKETS = {
     "vn": Market("vn", "VND", _VietnamSeller, VietnamAssumptions(), VN_PROFILES,
-                 {"mdr_bps": VietnamAssumptions.wallet_mdr_bps, "cod_fee_bps": VietnamAssumptions.cod_fee_bps,
+                 {"mdr_bps": VietnamAssumptions.wallet_mdr_bps,
+                  "payment_type_fee_bps": {"bank_transfer": 0, "wallet": VietnamAssumptions.wallet_mdr_bps},
+                  "cod_fee_bps": VietnamAssumptions.cod_fee_bps,
                   "amount_tolerance": 1_000},
                  {"prices": "Olist item prices x price_scale VND/BRL and freight x freight_scale (clipped), "
                             "rounded to 1,000 VND: Vietnamese order values, not the FX rate",
