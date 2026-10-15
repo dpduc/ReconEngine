@@ -9,7 +9,9 @@ import pandas as pd
 import pytest
 
 from recon.olistdata import generate_from_olist
-from recon.perf import CostModel, _subprocess_env, main, pair_repeats, render_report, report, scale_benchmark
+from recon.funnel import STEP_GROUPS, STEPS
+from recon.perf import (CostModel, _subprocess_env, main, matching_share, pair_repeats, render_report, report,
+                        run_groups, scale_benchmark)
 from recon.pipeline import load_config, run
 from recon.timing import RunMeter, process_peak_rss_bytes
 
@@ -127,6 +129,22 @@ def test_report_gives_p50_p95_p99_overall_and_per_stage():
     assert "| 1,000 | 6 | Run | 7.000 | 11.500 | 11.900 |" in lines
     assert "| 1,000 | `load` | 3.500 | 5.750 | 5.950 |" in lines
     assert "| 1,000 | `export` | 0.300 | 0.480 | 0.496 |" in lines  # only five samples ran it
+
+
+def test_every_funnel_step_has_a_group():
+    assert set(STEP_GROUPS) == {step.name for step in STEPS}
+
+
+def test_matching_share_is_linking_and_rule_checks_over_run():
+    sample = _sample(1.0, load=0.2, **{"funnel:link_exact": 0.3, "funnel:amount_mismatch": 0.1,
+                                       "funnel:decision": 0.5, "funnel:status_policy": 0.4, "export": 9.0})
+
+    assert matching_share(sample) == pytest.approx(0.4 / 2.0)
+    assert run_groups(sample) == pytest.approx({"load": 0.2, "linking": 0.3, "rule checks": 0.1, "decision": 0.5,
+                                                "policy/routing": 0.4, "untimed": 0.5})
+    markdown = render_report({10: [sample]})
+    assert "linking and rule-check steps over the wall time of `run`" in markdown
+    assert "| 10 | `decision` | 25% |" in markdown and "| 10 | `untimed` | 25% |" in markdown
 
 
 def test_scaling_copies_orphan_rows_once(small_benchmark, tmp_path):

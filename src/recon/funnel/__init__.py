@@ -30,7 +30,22 @@ STEPS: list[FunnelStep] = [
     FunnelStep("decision", decision),
 ]
 
+# What each step is for, so time can be reported per group (matching = linking + rule checks).
+LINKING, RULE_CHECKS, DECISION, POLICY_ROUTING = "linking", "rule checks", "decision", "policy/routing"
+STEP_GROUPS: dict[str, str] = {
+    "missing_source_evidence": POLICY_ROUTING,
+    "status_policy": POLICY_ROUTING,
+    "link_exact": LINKING,
+    "link_constrained": LINKING,
+    "link_candidates": LINKING,
+    "route_review": POLICY_ROUTING,
+    **{step.name: RULE_CHECKS for step in RULE_STEPS},
+    "decision": DECISION,
+}
+MATCHING_GROUPS = (LINKING, RULE_CHECKS)
+
 __all__ = [
+    "DECISION", "LINKING", "MATCHING_GROUPS", "POLICY_ROUTING", "RULE_CHECKS", "STEP_GROUPS",
     "RULE_VERSION", "STEPS", "FunnelContext", "FunnelStep", "StepOutcome",
     "build_units", "decide", "run_funnel", "split",
 ]

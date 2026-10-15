@@ -24,10 +24,12 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from recon.funnel import MATCHING_GROUPS, STEP_GROUPS
 from recon.timing import process_peak_rss_bytes
 
 FILES = ("oms_orders.csv", "bank_statement.csv", "logistics_report.csv", "ground_truth.csv")
-MATCHING_PREFIX = "funnel:"  # linking, rule checks and the decision
+FUNNEL_PREFIX = "funnel:"
+UNTIMED = "untimed"  # `run` time outside every recorded stage
 
 
 # --- scaling ---------------------------------------------------------------------------------
@@ -186,6 +188,27 @@ def _wall_seconds(sample: dict[str, Any]) -> float:
     return sample["inspect_seconds"] + sample["run_seconds"] + sample["export_seconds"]
 
 
+def stage_group(stage: str) -> str:
+    """A funnel step's group (see `recon.funnel.STEP_GROUPS`); any other stage is its own group."""
+    return STEP_GROUPS[stage.removeprefix(FUNNEL_PREFIX)] if stage.startswith(FUNNEL_PREFIX) else stage
+
+
+def run_groups(sample: dict[str, Any]) -> dict[str, float]:
+    """Seconds of `run` per group, with the unrecorded remainder as `untimed`; export is not part of `run`."""
+    groups: dict[str, float] = {}
+    for stage, seconds in sample["stages"].items():
+        if stage != "export":
+            groups[stage_group(stage)] = groups.get(stage_group(stage), 0.0) + seconds
+    groups[UNTIMED] = max(sample["run_seconds"] - sum(groups.values()), 0.0)
+    return groups
+
+
+def matching_share(sample: dict[str, Any]) -> float:
+    """Linking + rule-check steps over the wall time of `run`."""
+    groups = run_groups(sample)
+    return sum(groups.get(group, 0.0) for group in MATCHING_GROUPS) / max(sample["run_seconds"], 1e-9)
+
+
 def _pct_cells(values: list[float]) -> str:
     return " | ".join(f"{value:.3f}" for value in _pct(values))
 
@@ -207,14 +230,24 @@ def render_report(samples: dict[int, list[dict[str, Any]]], cost: CostModel = Co
                   for name, measure in measures.items()]
 
     lines += ["", "## Throughput and memory", "",
+              "Matching share is the time of the funnel's linking and rule-check steps over the wall time "
+              "of `run` (median over samples); the decision and policy/routing steps are not matching.", "",
               "| Units | Matching share | Peak memory (GB) | Units / s (run P50) | Units / s (overall P50) |",
               "|---|---|---|---|---|"]
     for size, runs in samples.items():
-        matching = np.median([sum(v for k, v in r["stages"].items() if k.startswith(MATCHING_PREFIX))
-                              / max(r["run_seconds"], 1e-9) for r in runs])
+        matching = np.median([matching_share(r) for r in runs])
         run_p50, wall_p50 = _pct([r["run_seconds"] for r in runs])[0], _pct([_wall_seconds(r) for r in runs])[0]
         lines.append(f"| {size:,} | {matching:.0%} | {max(r['peak_rss_bytes'] for r in runs) / 1e9:.2f} | "
                      f"{size / run_p50:,.0f} | {size / wall_p50:,.0f} |")
+
+    lines += ["", "## Where `run` time goes (median share of `run`)", "",
+              "Funnel steps are grouped as in `recon.funnel.STEP_GROUPS`; other stages are listed by name, "
+              f"and `{UNTIMED}` is `run` time outside every recorded stage.", "",
+              "| Units | Group | Share |", "|---|---|---|"]
+    for size, runs in samples.items():
+        shares = pd.DataFrame([{group: seconds / max(r["run_seconds"], 1e-9) for group, seconds in run_groups(r).items()}
+                               for r in runs]).fillna(0.0).median()
+        lines += [f"| {size:,} | `{group}` | {share:.0%} |" for group, share in shares.items()]
 
     largest = max(samples)
     run_stages = [{k: v for k, v in r["stages"].items() if k != "export"} for r in samples[largest]]  # export: not `run`
