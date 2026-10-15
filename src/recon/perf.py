@@ -178,22 +178,43 @@ def report(base_dir: str | Path, sizes: list[int], repeats: list[int], config_pa
         scaled = scale_benchmark(base_dir, work_dir / f"scaled_{size}", size)
         samples[size] = [_measure_in_subprocess(scaled, config_path) for _ in range(count)]
 
+    return render_report(samples, cost)
+
+
+def _wall_seconds(sample: dict[str, Any]) -> float:
+    """What the user waits for: inspect, run and export."""
+    return sample["inspect_seconds"] + sample["run_seconds"] + sample["export_seconds"]
+
+
+def _pct_cells(values: list[float]) -> str:
+    return " | ".join(f"{value:.3f}" for value in _pct(values))
+
+
+def render_report(samples: dict[int, list[dict[str, Any]]], cost: CostModel = CostModel()) -> str:
+    """The markdown report for samples per size, as `measure_once` returns them."""
     lines = ["# Performance and cost", "",
              f"Measured on {_machine()}. Each sample is a fresh process running inspect, run and export, "
              "as the app does. Percentiles are over the samples listed; with few samples P95/P99 are close "
              "to the maximum.", "",
-             "## Reconcile time (`run`: load, checks, funnel, reverse pass)", "",
-             "| Units | Samples | P50 (s) | P95 (s) | P99 (s) | Inspect P50 (s) | Export P50 (s) | Matching share | "
-             "Peak memory (GB) | Units / s |",
-             "|---|---|---|---|---|---|---|---|---|---|"]
+             "## Time per reconciliation (seconds)", "",
+             "Overall is what the user waits for: inspect + run + export. `run` is load, checks, funnel "
+             "and reverse pass.", "",
+             "| Units | Samples | Measure | P50 | P95 | P99 |", "|---|---|---|---|---|---|"]
+    measures = {"Overall": _wall_seconds, "Inspect": lambda r: r["inspect_seconds"],
+                "Run": lambda r: r["run_seconds"], "Export": lambda r: r["export_seconds"]}
     for size, runs in samples.items():
-        p50, p95, p99 = _pct([r["run_seconds"] for r in runs])
+        lines += [f"| {size:,} | {len(runs)} | {name} | {_pct_cells([measure(r) for r in runs])} |"
+                  for name, measure in measures.items()]
+
+    lines += ["", "## Throughput and memory", "",
+              "| Units | Matching share | Peak memory (GB) | Units / s (run P50) | Units / s (overall P50) |",
+              "|---|---|---|---|---|"]
+    for size, runs in samples.items():
         matching = np.median([sum(v for k, v in r["stages"].items() if k.startswith(MATCHING_PREFIX))
                               / max(r["run_seconds"], 1e-9) for r in runs])
-        lines.append(f"| {size:,} | {len(runs)} | {p50:.2f} | {p95:.2f} | {p99:.2f} | "
-                     f"{np.median([r['inspect_seconds'] for r in runs]):.2f} | "
-                     f"{np.median([r['export_seconds'] for r in runs]):.2f} | {matching:.0%} | "
-                     f"{max(r['peak_rss_bytes'] for r in runs) / 1e9:.2f} | {size / p50:,.0f} |")
+        run_p50, wall_p50 = _pct([r["run_seconds"] for r in runs])[0], _pct([_wall_seconds(r) for r in runs])[0]
+        lines.append(f"| {size:,} | {matching:.0%} | {max(r['peak_rss_bytes'] for r in runs) / 1e9:.2f} | "
+                     f"{size / run_p50:,.0f} | {size / wall_p50:,.0f} |")
 
     largest = max(samples)
     run_stages = [{k: v for k, v in r["stages"].items() if k != "export"} for r in samples[largest]]  # export: not `run`
@@ -215,6 +236,14 @@ def report(base_dir: str | Path, sizes: list[int], repeats: list[int], config_pa
         costs = pd.DataFrame([cost.per_run(r) for r in runs]).median()
         lines.append(f"| {size:,} | {costs['compute']:.5f} | {costs['memory']:.5f} | {costs['storage']:.5f} | "
                      f"{costs['api']:.5f} | {costs['total']:.5f} | {costs['total'] / size * 1000:.6f} |")
+
+    lines += ["", "## Appendix: time per stage (seconds)", "",
+              "Stages in pipeline order; percentiles are over the samples that ran the stage.", "",
+              "| Units | Stage | P50 | P95 | P99 |", "|---|---|---|---|---|"]
+    for size, runs in samples.items():
+        stages = list(dict.fromkeys(stage for r in runs for stage in r["stages"]))
+        lines += [f"| {size:,} | `{stage}` | {_pct_cells([r['stages'][stage] for r in runs if stage in r['stages']])} |"
+                  for stage in stages]
     return "\n".join(lines) + "\n"
 
 

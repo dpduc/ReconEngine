@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 
 from recon.olistdata import generate_from_olist
-from recon.perf import CostModel, _subprocess_env, main, pair_repeats, report, scale_benchmark
+from recon.perf import CostModel, _subprocess_env, main, pair_repeats, render_report, report, scale_benchmark
 from recon.pipeline import load_config, run
 from recon.timing import RunMeter, process_peak_rss_bytes
 
@@ -104,9 +104,29 @@ def test_report_gives_percentiles_matching_share_and_cost(small_benchmark, tmp_p
     markdown = report(base_dir=small_benchmark, sizes=[300, 600], repeats=[3, 2], config_path=CONFIG,
                       work_dir=tmp_path, cost=CostModel())
 
-    for heading in ("P50", "P95", "P99", "Matching share", "Peak memory", "Cost per 1,000 units", "Slowest stages"):
+    for heading in ("## Time per reconciliation", "## Throughput and memory", "## Slowest stages",
+                    "## Cost per reconciliation", "## Appendix: time per stage", "Matching share", "Peak memory"):
         assert heading in markdown
-    assert "| 300 |" in markdown and "| 600 |" in markdown
+    for size, samples in (("300", 3), ("600", 2)):
+        assert all(f"| {size} | {samples} | {measure} |" in markdown for measure in ("Overall", "Inspect", "Run", "Export"))
+        assert f"| {size} | `funnel:link_exact` |" in markdown and f"| {size} | `export` |" in markdown
+
+
+def _sample(seconds: float, **stages: float) -> dict:
+    return {"units": 10, "inspect_seconds": seconds, "run_seconds": 2 * seconds, "export_seconds": seconds,
+            "cpu_seconds": seconds, "peak_rss_bytes": 10**8, "input_bytes": 10**6, "output_bytes": 10**6,
+            "stages": stages}
+
+
+def test_report_gives_p50_p95_p99_overall_and_per_stage():
+    runs = [_sample(s, load=s, export=s / 10) for s in (1.0, 2.0, 3.0, 4.0, 5.0)] + [_sample(6.0, load=6.0)]
+
+    lines = render_report({1000: runs}).splitlines()
+
+    assert "| 1,000 | 6 | Overall | 14.000 | 23.000 | 23.800 |" in lines  # 4 x 1..6
+    assert "| 1,000 | 6 | Run | 7.000 | 11.500 | 11.900 |" in lines
+    assert "| 1,000 | `load` | 3.500 | 5.750 | 5.950 |" in lines
+    assert "| 1,000 | `export` | 0.300 | 0.480 | 0.496 |" in lines  # only five samples ran it
 
 
 def test_scaling_copies_orphan_rows_once(small_benchmark, tmp_path):
