@@ -26,11 +26,6 @@ class StageTimer:
             self.stages[name] = self.stages.get(name, 0.0) + time.perf_counter() - start
 
 
-@contextmanager
-def nothing() -> Iterator[None]:
-    yield
-
-
 class RunMeter:
     """Wall clock, CPU and peak memory of one run, for its manifest `performance` block.
 

@@ -16,7 +16,7 @@ from recon.config import Policy
 from recon.funnel.explain import explain_all
 from recon.ingest import parse_dates
 from recon.schema import INGESTED_AT, LINEAGE_COLUMNS
-from recon.timing import StageTimer, nothing
+from recon.timing import StageTimer
 
 RULE_VERSION = "1.6.0"  # bump whenever funnel logic changes
 
@@ -89,9 +89,10 @@ def build_units(feeds: dict[str, pd.DataFrame]) -> pd.DataFrame:
 def run_funnel(units: pd.DataFrame, steps: list[FunnelStep], ctx: FunnelContext,
                timer: StageTimer | None = None) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Return (unit results, funnel counts); `timer` records each step as 'funnel:<step>'."""
+    timer = timer or StageTimer()
     decided, counts = [], []
     for step in steps:
-        with timer.stage(f"funnel:{step.name}") if timer else nothing():
+        with timer.stage(f"funnel:{step.name}"):
             outcome = step.apply(units, ctx)
         decided.append(outcome.decided.assign(deciding_step=step.name))
         counts.append({"step": step.name, "units_in": len(units),

@@ -72,7 +72,7 @@ from recon.schema import (
     SOURCE_FILE,
     SOURCE_ROW,
 )
-from recon.timing import RunMeter, StageTimer, nothing
+from recon.timing import RunMeter, StageTimer
 
 __all__ = [
     "inspect", "run", "Sources", "describe_sources",
@@ -116,7 +116,7 @@ def _split_excluded(feeds: dict[str, pd.DataFrame]) -> tuple[dict[str, pd.DataFr
 
 
 def _prepare(sources: Sources, config: RunConfig, timer: StageTimer | None = None) -> _Prepared:
-    stage = timer.stage if timer else (lambda name: nothing())
+    stage = (timer or StageTimer()).stage
     ingested_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with stage("load"):
         inputs = {
@@ -156,7 +156,7 @@ def run(sources: Sources, config: RunConfig) -> ReconRun:
 def _run(sources: Sources, config: RunConfig, meter: RunMeter) -> ReconRun:
     timer = meter.timer
     prepared = _prepare(sources, config, timer)
-    input_bytes = int(sum(loaded.size for loaded in prepared.inputs.values()))
+    input_bytes = int(sum(loaded.size_bytes for loaded in prepared.inputs.values()))
     if not prepared.report.gate_open:  # the stages that ran (load through profiles) are still recorded
         manifest = {"performance": meter.performance(units=0, input_bytes=input_bytes)}
         return ReconRun(status=BLOCKED, health=prepared.report, excluded=prepared.excluded, manifest=manifest)

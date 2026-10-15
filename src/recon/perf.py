@@ -17,9 +17,8 @@ import platform
 import subprocess
 import sys
 import time
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -38,6 +37,16 @@ def _fresh_id(order_id: str, copy: int) -> str:
     return order_id if copy == 0 else hashlib.md5(f"{order_id}:{copy}".encode()).hexdigest()
 
 
+def _read(source_dir: Path, name: str) -> pd.DataFrame:
+    return pd.read_csv(source_dir / name, dtype=str, keep_default_na=False)
+
+
+def _rename_ids(frame: pd.DataFrame, key: pd.Series, columns: list[str], new: dict[str, str]) -> pd.DataFrame:
+    """Replace each row's order id (`key`) with its new id inside `columns`; rows without an id stay."""
+    return frame.assign(**{column: [value.replace(old, new.get(old, old)) if old else value
+                                    for value, old in zip(frame[column], key)] for column in columns})
+
+
 def scale_benchmark(source_dir: str | Path, out_dir: str | Path, units: int) -> Path:
     """Copy the generated benchmark to exactly `units` orders, replicating orders under fresh ids.
 
@@ -52,8 +61,7 @@ def scale_benchmark(source_dir: str | Path, out_dir: str | Path, units: int) -> 
     marker = out_dir / "scale.json"
     if marker.exists() and json.loads(marker.read_text(encoding="utf-8")) == stamp:
         return out_dir
-    read = lambda name: pd.read_csv(source_dir / name, dtype=str, keep_default_na=False)  # noqa: E731
-    oms, bank, logistics, truth = (read(name) for name in FILES)
+    oms, bank, logistics, truth = (_read(source_dir, name) for name in FILES)
     copies = math.ceil(units / len(oms))
     keys = {"oms": oms["order_id"], "bank": bank["txn_ref"].str.removeprefix("OLIST-PAY-"),
             "logistics": logistics["client_order_code"], "truth": truth["order_id"]}
@@ -65,14 +73,11 @@ def scale_benchmark(source_dir: str | Path, out_dir: str | Path, units: int) -> 
     out = {name: [] for name in keys}
     for copy in range(copies):
         new = {old: _fresh_id(old, copy) for old in oms["order_id"]}
-        swap = lambda frame, key, columns: frame.assign(**{  # noqa: E731
-            column: [value.replace(old, new.get(old, old)) if old else value
-                     for value, old in zip(frame[column], key)] for column in columns})
-        out["oms"].append(swap(oms, keys["oms"], ["order_id", "tracking_no"]))
-        out["bank"].append(swap(bank, keys["bank"], ["txn_ref", "description"]))
-        out["logistics"].append(swap(logistics, keys["logistics"],
-                                     ["tracking_code", "client_order_code", "remittance_id"]))
-        out["truth"].append(swap(truth, keys["truth"], ["order_id", "tracking_no", "bank_txn_ref"]))
+        out["oms"].append(_rename_ids(oms, keys["oms"], ["order_id", "tracking_no"], new))
+        out["bank"].append(_rename_ids(bank, keys["bank"], ["txn_ref", "description"], new))
+        out["logistics"].append(_rename_ids(logistics, keys["logistics"],
+                                            ["tracking_code", "client_order_code", "remittance_id"], new))
+        out["truth"].append(_rename_ids(truth, keys["truth"], ["order_id", "tracking_no", "bank_txn_ref"], new))
     frames = {name: pd.concat(parts, ignore_index=True) for name, parts in out.items()}
     keep = set(frames["oms"]["order_id"].iloc[:units])
     frames["oms"] = frames["oms"].iloc[:units]
@@ -91,7 +96,27 @@ def scale_benchmark(source_dir: str | Path, out_dir: str | Path, units: int) -> 
 
 # --- one measurement -------------------------------------------------------------------------
 
-def measure_once(sources: str | Path, config_path: str | Path) -> dict[str, Any]:
+@dataclass(frozen=True)
+class Sample:
+    """One measured reconciliation: inspect, run and export in a fresh process."""
+
+    units: int
+    inspect_seconds: float
+    run_seconds: float
+    export_seconds: float
+    cpu_seconds: float  # inspect + run + export, not process startup or imports
+    peak_rss_bytes: int
+    input_bytes: int
+    output_bytes: int
+    stages: dict[str, float] = field(default_factory=dict)
+
+    @property
+    def wall_seconds(self) -> float:
+        """What the user waits for: inspect, run and export."""
+        return self.inspect_seconds + self.run_seconds + self.export_seconds
+
+
+def measure_once(sources: str | Path, config_path: str | Path) -> Sample:
     """Inspect, run and export once, as the app does; returns timings, CPU, memory and sizes."""
     from recon.pipeline import inspect, load_config, run
 
@@ -104,17 +129,11 @@ def measure_once(sources: str | Path, config_path: str | Path) -> dict[str, Any]
     outcome.bundle()
     exported = time.perf_counter()
     performance = outcome.manifest["performance"]
-    return {
-        "units": performance["units"],
-        "inspect_seconds": inspected - started,
-        "run_seconds": ran - inspected,
-        "export_seconds": exported - ran,
-        "cpu_seconds": time.process_time() - cpu_started,  # inspect + run + export
-        "peak_rss_bytes": process_peak_rss_bytes(),  # a fresh process per sample: its lifetime peak
-        "input_bytes": performance["input_bytes"],
-        "output_bytes": performance["output_bytes"],
-        "stages": performance["stages"],
-    }
+    return Sample(units=performance["units"], inspect_seconds=inspected - started, run_seconds=ran - inspected,
+                  export_seconds=exported - ran, cpu_seconds=time.process_time() - cpu_started,
+                  peak_rss_bytes=process_peak_rss_bytes(),  # a fresh process per sample: its lifetime peak
+                  input_bytes=performance["input_bytes"], output_bytes=performance["output_bytes"],
+                  stages=performance["stages"])
 
 
 # --- cost and report -------------------------------------------------------------------------
@@ -129,11 +148,11 @@ class CostModel:
     retention_months: int = 12  # inputs and outputs kept this long
     api_per_run: float = 0.0  # no external API is called today
 
-    def per_run(self, sample: dict[str, Any]) -> dict[str, float]:
-        wall_hours = (sample["inspect_seconds"] + sample["run_seconds"] + sample["export_seconds"]) / 3600
-        compute = sample["cpu_seconds"] / 3600 * self.vcpu_hour
-        memory = sample["peak_rss_bytes"] / 1e9 * wall_hours * self.gb_hour
-        storage = (sample["input_bytes"] + sample["output_bytes"]) / 1e9 * self.storage_gb_month * self.retention_months
+    def per_run(self, sample: Sample) -> dict[str, float]:
+        wall_hours = sample.wall_seconds / 3600
+        compute = sample.cpu_seconds / 3600 * self.vcpu_hour
+        memory = sample.peak_rss_bytes / 1e9 * wall_hours * self.gb_hour
+        storage = (sample.input_bytes + sample.output_bytes) / 1e9 * self.storage_gb_month * self.retention_months
         return {"compute": compute, "memory": memory, "storage": storage, "api": self.api_per_run,
                 "total": compute + memory + storage + self.api_per_run}
 
@@ -157,10 +176,10 @@ def _subprocess_env() -> dict[str, str]:
     return {**os.environ, "PYTHONPATH": os.pathsep.join(path for path in paths if path)}
 
 
-def _measure_in_subprocess(sources: Path, config_path: Path) -> dict[str, Any]:
+def _measure_in_subprocess(sources: Path, config_path: Path) -> Sample:
     done = subprocess.run([sys.executable, "-m", "recon.perf", "once", str(sources), str(config_path)],
                           capture_output=True, text=True, env=_subprocess_env(), check=True)
-    return json.loads(done.stdout.strip().splitlines()[-1])
+    return Sample(**json.loads(done.stdout.strip().splitlines()[-1]))
 
 
 def _pct(values: list[float]) -> tuple[float, float, float]:
@@ -168,11 +187,21 @@ def _pct(values: list[float]) -> tuple[float, float, float]:
     return float(p50), float(p95), float(p99)
 
 
-def _machine() -> str:
-    import pandas
+def _median(values: list[float]) -> float:
+    return _pct(values)[0]
 
+
+def _median_costs(runs: list[Sample], cost: CostModel) -> pd.Series:
+    return pd.DataFrame([cost.per_run(r) for r in runs]).median()
+
+
+def _median_units(runs: list[Sample]) -> int:
+    return int(np.median([r.units for r in runs]))
+
+
+def _machine() -> str:
     return (f"{platform.system()} {platform.release()}, {platform.processor() or platform.machine()}, "
-            f"{os.cpu_count()} logical CPUs, Python {platform.python_version()}, pandas {pandas.__version__}")
+            f"{os.cpu_count()} logical CPUs, Python {platform.python_version()}, pandas {pd.__version__}")
 
 
 def pair_repeats(sizes: list[int], repeats: list[int]) -> list[int]:
@@ -188,7 +217,7 @@ def report(base_dir: str | Path, sizes: list[int], repeats: list[int], config_pa
            work_dir: str | Path, cost: CostModel = CostModel()) -> str:
     """Measure each size `repeats` times (each in a fresh process) and return a markdown report."""
     work_dir, config_path = Path(work_dir), Path(config_path).resolve()
-    samples: dict[int, list[dict[str, Any]]] = {}
+    samples: dict[int, list[Sample]] = {}
     for size, count in zip(sizes, pair_repeats(sizes, repeats)):
         scaled = scale_benchmark(base_dir, work_dir / f"scaled_{size}", size)
         samples[size] = [_measure_in_subprocess(scaled, config_path) for _ in range(count)]
@@ -196,37 +225,32 @@ def report(base_dir: str | Path, sizes: list[int], repeats: list[int], config_pa
     return render_report(samples, cost)
 
 
-def _wall_seconds(sample: dict[str, Any]) -> float:
-    """What the user waits for: inspect, run and export."""
-    return sample["inspect_seconds"] + sample["run_seconds"] + sample["export_seconds"]
-
-
 def stage_group(stage: str) -> str:
     """A funnel step's group (see `recon.funnel.STEP_GROUPS`); any other stage is its own group."""
     return STEP_GROUPS[stage.removeprefix(FUNNEL_PREFIX)] if stage.startswith(FUNNEL_PREFIX) else stage
 
 
-def run_groups(sample: dict[str, Any]) -> dict[str, float]:
+def run_groups(sample: Sample) -> dict[str, float]:
     """Seconds of `run` per group, with the unrecorded remainder as `untimed`; export is not part of `run`."""
     groups: dict[str, float] = {}
-    for stage, seconds in sample["stages"].items():
+    for stage, seconds in sample.stages.items():
         if stage != "export":
             groups[stage_group(stage)] = groups.get(stage_group(stage), 0.0) + seconds
-    groups[UNTIMED] = max(sample["run_seconds"] - sum(groups.values()), 0.0)
+    groups[UNTIMED] = max(sample.run_seconds - sum(groups.values()), 0.0)
     return groups
 
 
-def matching_share(sample: dict[str, Any]) -> float:
+def matching_share(sample: Sample) -> float:
     """Linking + rule-check steps over the wall time of `run`."""
     groups = run_groups(sample)
-    return sum(groups.get(group, 0.0) for group in MATCHING_GROUPS) / max(sample["run_seconds"], 1e-9)
+    return sum(groups.get(group, 0.0) for group in MATCHING_GROUPS) / max(sample.run_seconds, 1e-9)
 
 
 def _pct_cells(values: list[float]) -> str:
     return " | ".join(f"{value:.3f}" for value in _pct(values))
 
 
-def render_report(samples: dict[int, list[dict[str, Any]]], cost: CostModel = CostModel()) -> str:
+def render_report(samples: dict[int, list[Sample]], cost: CostModel = CostModel()) -> str:
     """The markdown report for samples per size, as `measure_once` returns them."""
     lines = ["# Performance and cost", "",
              f"Measured on {_machine()}. Each sample is a fresh process running inspect, run and export, "
@@ -236,10 +260,10 @@ def render_report(samples: dict[int, list[dict[str, Any]]], cost: CostModel = Co
              "Overall is what the user waits for: inspect + run + export. `run` is load, checks, funnel "
              "and reverse pass.", "",
              "| Units | Samples | Measure | P50 | P95 | P99 |", "|---|---|---|---|---|---|"]
-    measures = {"Overall": _wall_seconds, "Inspect": lambda r: r["inspect_seconds"],
-                "Run": lambda r: r["run_seconds"], "Export": lambda r: r["export_seconds"]}
+    measures = {"Overall": "wall_seconds", "Inspect": "inspect_seconds", "Run": "run_seconds",
+                "Export": "export_seconds"}
     for size, runs in samples.items():
-        lines += [f"| {size:,} | {len(runs)} | {name} | {_pct_cells([measure(r) for r in runs])} |"
+        lines += [f"| {size:,} | {len(runs)} | {name} | {_pct_cells([getattr(r, measure) for r in runs])} |"
                   for name, measure in measures.items()]
 
     lines += ["", "## Throughput and memory", "",
@@ -249,8 +273,8 @@ def render_report(samples: dict[int, list[dict[str, Any]]], cost: CostModel = Co
               "|---|---|---|---|---|"]
     for size, runs in samples.items():
         matching = np.median([matching_share(r) for r in runs])
-        run_p50, wall_p50 = _pct([r["run_seconds"] for r in runs])[0], _pct([_wall_seconds(r) for r in runs])[0]
-        lines.append(f"| {size:,} | {matching:.0%} | {max(r['peak_rss_bytes'] for r in runs) / 1e9:.2f} | "
+        run_p50, wall_p50 = _median([r.run_seconds for r in runs]), _median([r.wall_seconds for r in runs])
+        lines.append(f"| {size:,} | {matching:.0%} | {max(r.peak_rss_bytes for r in runs) / 1e9:.2f} | "
                      f"{size / run_p50:,.0f} | {size / wall_p50:,.0f} |")
 
     lines += ["", "## Where `run` time goes (median share of `run`)", "",
@@ -258,14 +282,14 @@ def render_report(samples: dict[int, list[dict[str, Any]]], cost: CostModel = Co
               f"and `{UNTIMED}` is `run` time outside every recorded stage.", "",
               "| Units | Group | Share |", "|---|---|---|"]
     for size, runs in samples.items():
-        shares = pd.DataFrame([{group: seconds / max(r["run_seconds"], 1e-9) for group, seconds in run_groups(r).items()}
+        shares = pd.DataFrame([{group: seconds / max(r.run_seconds, 1e-9) for group, seconds in run_groups(r).items()}
                                for r in runs]).fillna(0.0).median()
         lines += [f"| {size:,} | `{group}` | {share:.0%} |" for group, share in shares.items()]
 
     largest = max(samples)
-    run_stages = [{k: v for k, v in r["stages"].items() if k != "export"} for r in samples[largest]]  # export: not `run`
+    run_stages = [{k: v for k, v in r.stages.items() if k != "export"} for r in samples[largest]]  # export: not `run`
     stage_medians = pd.DataFrame(run_stages).median().sort_values(ascending=False)
-    run_p50 = _pct([r["run_seconds"] for r in samples[largest]])[0]
+    run_p50 = _median([r.run_seconds for r in samples[largest]])
     lines += ["", f"## Slowest stages at {largest:,} units (median seconds, share of `run`)", "",
               "| Stage | Seconds | Share |", "|---|---|---|"]
     lines += [f"| `{stage}` | {seconds:.2f} | {seconds / run_p50:.0%} |"
@@ -282,24 +306,22 @@ def render_report(samples: dict[int, list[dict[str, Any]]], cost: CostModel = Co
               "| Compute / memory / storage share |",
               "|---|---|---|---|---|---|---|---|---|---|"]
     for size, runs in samples.items():
-        costs = pd.DataFrame([cost.per_run(r) for r in runs]).median()
-        per_1000 = pd.DataFrame([{name: value / max(r["units"], 1) * 1000 for name, value in cost.per_run(r).items()}
+        costs = _median_costs(runs, cost)
+        per_1000 = pd.DataFrame([{name: value / max(r.units, 1) * 1000 for name, value in cost.per_run(r).items()}
                                  for r in runs]).median()
-        units = int(np.median([r["units"] for r in runs]))
+        units = _median_units(runs)
         shares = " / ".join(f"{costs[name] / costs['total']:.0%}" for name in ("compute", "memory", "storage"))
         lines.append(f"| {units:,} | {costs['compute']:.5f} | {costs['memory']:.5f} | {costs['storage']:.5f} | "
                      f"{costs['api']:.5f} | {costs['total']:.5f} | {per_1000['compute'] + per_1000['memory']:.6f} | "
                      f"{per_1000['storage']:.6f} | {per_1000['total']:.6f} | {shares} |")
-    largest_runs = samples[max(samples)]
-    lines += ["", _dominance(int(np.median([r["units"] for r in largest_runs])),
-                             pd.DataFrame([cost.per_run(r) for r in largest_runs]).median(), cost)]
+    lines += ["", _dominance(_median_units(samples[largest]), _median_costs(samples[largest], cost), cost)]
 
     lines += ["", "## Appendix: time per stage (seconds)", "",
               "Stages in pipeline order; percentiles are over the samples that ran the stage.", "",
               "| Units | Stage | P50 | P95 | P99 |", "|---|---|---|---|---|"]
     for size, runs in samples.items():
-        stages = list(dict.fromkeys(stage for r in runs for stage in r["stages"]))
-        lines += [f"| {size:,} | `{stage}` | {_pct_cells([r['stages'][stage] for r in runs if stage in r['stages']])} |"
+        stages = list(dict.fromkeys(stage for r in runs for stage in r.stages))
+        lines += [f"| {size:,} | `{stage}` | {_pct_cells([r.stages[stage] for r in runs if stage in r.stages])} |"
                   for stage in stages]
     return "\n".join(lines) + "\n"
 
@@ -320,7 +342,7 @@ def main(argv: list[str] | None = None) -> None:
     rep.add_argument("--out", default="reports/performance.md")
     args = parser.parse_args(argv)
     if args.command == "once":
-        print(json.dumps(measure_once(args.sources, args.config)))
+        print(json.dumps(asdict(measure_once(args.sources, args.config))))
         return
     try:
         pair_repeats(args.sizes, args.repeats)

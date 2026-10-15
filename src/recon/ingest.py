@@ -111,7 +111,7 @@ class LoadedFeed:
     path: str  # as written in the run config, relative to the sources
     sha256: str
     frame: pd.DataFrame  # canonical columns + unmapped pass-through columns + lineage
-    size: int = 0  # raw bytes read
+    size_bytes: int  # raw bytes read
 
 
 def sha256(data: bytes) -> str:

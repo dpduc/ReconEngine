@@ -11,7 +11,7 @@ import pytest
 
 from recon.olistdata import generate_from_olist
 from recon.funnel import STEP_GROUPS, STEPS
-from recon.perf import (CostModel, _subprocess_env, main, matching_share, measure_once, pair_repeats, render_report, report,
+from recon.perf import (CostModel, Sample, _subprocess_env, main, matching_share, measure_once, pair_repeats, render_report, report,
                         run_groups, scale_benchmark)
 from recon.pipeline import load_config, run
 from recon.timing import RunMeter, process_peak_rss_bytes
@@ -115,10 +115,9 @@ def test_report_gives_percentiles_matching_share_and_cost(small_benchmark, tmp_p
         assert f"| {size} | `funnel:link_exact` |" in markdown and f"| {size} | `export` |" in markdown
 
 
-def _sample(seconds: float, **stages: float) -> dict:
-    return {"units": 10, "inspect_seconds": seconds, "run_seconds": 2 * seconds, "export_seconds": seconds,
-            "cpu_seconds": seconds, "peak_rss_bytes": 10**8, "input_bytes": 10**6, "output_bytes": 10**6,
-            "stages": stages}
+def _sample(seconds: float, units: int = 10, **stages: float) -> Sample:
+    return Sample(units=units, inspect_seconds=seconds, run_seconds=2 * seconds, export_seconds=seconds,
+                  cpu_seconds=seconds, peak_rss_bytes=10**8, input_bytes=10**6, output_bytes=10**6, stages=stages)
 
 
 def test_report_gives_p50_p95_p99_overall_and_per_stage():
@@ -133,7 +132,7 @@ def test_report_gives_p50_p95_p99_overall_and_per_stage():
 
 
 def test_cost_per_1000_units_divides_by_measured_units_and_splits_compute_from_storage():
-    runs = [{**_sample(1.0), "units": 500}]  # asked for 1,000, measured 500
+    runs = [_sample(1.0, units=500)]  # asked for 1,000, measured 500
     cost = CostModel(vcpu_hour=3600.0, gb_hour=0.0, storage_gb_month=1000.0, retention_months=1)
 
     markdown = render_report({1000: runs}, cost)
@@ -149,7 +148,7 @@ def test_measured_cpu_excludes_what_ran_before_the_work(small_benchmark):
 
     sample = measure_once(small_benchmark, CONFIG)
 
-    assert 0 < sample["cpu_seconds"] <= time.process_time() - before
+    assert 0 < sample.cpu_seconds <= time.process_time() - before
 
 
 def test_every_funnel_step_has_a_group():
