@@ -6,7 +6,6 @@ Everything a shell needs (config types, fix-option ids, schema names) is re-expo
 from __future__ import annotations
 
 import io
-import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
@@ -73,7 +72,7 @@ from recon.schema import (
     SOURCE_FILE,
     SOURCE_ROW,
 )
-from recon.timing import StageTimer, nothing, performance
+from recon.timing import RunMeter, StageTimer, nothing
 
 __all__ = [
     "inspect", "run", "Sources", "describe_sources",
@@ -150,11 +149,16 @@ def inspect(sources: Sources, config: RunConfig) -> HealthReport:
 
 def run(sources: Sources, config: RunConfig) -> ReconRun:
     """Re-inspect; refuse with a blocked run while the gate is closed, else run the funnel."""
-    timer, started, cpu_started = StageTimer(), time.perf_counter(), time.process_time()
+    with RunMeter() as meter:
+        return _run(sources, config, meter)
+
+
+def _run(sources: Sources, config: RunConfig, meter: RunMeter) -> ReconRun:
+    timer = meter.timer
     prepared = _prepare(sources, config, timer)
     input_bytes = int(sum(loaded.size for loaded in prepared.inputs.values()))
     if not prepared.report.gate_open:  # the stages that ran (load through profiles) are still recorded
-        manifest = {"performance": performance(timer, started, cpu_started, units=0, input_bytes=input_bytes)}
+        manifest = {"performance": meter.performance(units=0, input_bytes=input_bytes)}
         return ReconRun(status=BLOCKED, health=prepared.report, excluded=prepared.excluded, manifest=manifest)
     policy = config.resolved_policy
     rate_table = read_source(sources, policy.fx.rate_table) if policy.fx and policy.fx.rate_table else None
@@ -185,8 +189,7 @@ def run(sources: Sources, config: RunConfig) -> ReconRun:
                     "close_watchlist": watchlist_summary(results)},
         "excluded_rows": {k: int(v) for k, v in prepared.excluded["feed"].value_counts().items()},
     }
-    manifest["performance"] = performance(timer, started, cpu_started, units=int(len(results)),
-                                          input_bytes=input_bytes)
+    manifest["performance"] = meter.performance(units=int(len(results)), input_bytes=input_bytes)
     return ReconRun(status=COMPLETED, health=prepared.report, results=results,
                     funnel=funnel_counts, manifest=manifest, feeds=prepared.feeds, orphans=orphans,
                     excluded=prepared.excluded)

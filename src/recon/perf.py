@@ -24,7 +24,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from recon.timing import peak_rss_bytes
+from recon.timing import process_peak_rss_bytes
 
 FILES = ("oms_orders.csv", "bank_statement.csv", "logistics_report.csv", "ground_truth.csv")
 MATCHING_PREFIX = "funnel:"  # linking, rule checks and the decision
@@ -108,7 +108,7 @@ def measure_once(sources: str | Path, config_path: str | Path) -> dict[str, Any]
         "run_seconds": ran - inspected,
         "export_seconds": exported - ran,
         "cpu_seconds": time.process_time(),  # whole process: inspect + run + export
-        "peak_rss_bytes": peak_rss_bytes(),
+        "peak_rss_bytes": process_peak_rss_bytes(),  # a fresh process per sample: its lifetime peak
         "input_bytes": performance["input_bytes"],
         "output_bytes": performance["output_bytes"],
         "stages": performance["stages"],

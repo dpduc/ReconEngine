@@ -11,6 +11,7 @@ import pytest
 from recon.olistdata import generate_from_olist
 from recon.perf import CostModel, _subprocess_env, main, pair_repeats, report, scale_benchmark
 from recon.pipeline import load_config, run
+from recon.timing import RunMeter, process_peak_rss_bytes
 
 from test_pipeline import OMS, write_sources
 
@@ -53,6 +54,27 @@ def test_a_blocked_run_records_the_stages_that_ran(tmp_path):
     performance = outcome.manifest["performance"]
     assert set(performance["stages"]) == {"load", "resolutions", "raw_checks", "parse_numeric", "checks", "profiles"}
     assert performance["units"] == 0 and performance["input_bytes"] > 0 and performance["peak_rss_bytes"] > 0
+
+
+def test_a_small_run_after_a_large_one_reports_its_own_peak(tmp_path):
+    with RunMeter() as large:
+        ballast = b"x" * 400_000_000  # written, so it is resident
+        large_peak = large.peak_rss_bytes()
+        del ballast
+
+    performance = run(tmp_path, write_sources(tmp_path)).manifest["performance"]
+
+    assert performance["process_peak_rss_bytes"] >= large_peak
+    assert 0 < performance["peak_rss_bytes"] < large_peak - 300_000_000
+
+
+def test_a_run_that_sets_a_new_high_reports_the_lifetime_peak():
+    with RunMeter() as meter:
+        ballast = b"x" * (process_peak_rss_bytes() + 100_000_000)  # above any earlier peak of this process
+        del ballast
+        performance = meter.performance(units=0, input_bytes=0)
+
+    assert performance["peak_rss_bytes"] == performance["process_peak_rss_bytes"]
 
 
 @pytest.fixture(scope="module")
