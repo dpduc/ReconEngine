@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Reconcile a period with a cut-off, and carry open items forward

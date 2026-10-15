@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 ---
 
 # Reconcile each channel along its money chain, keeping the order as the unit
