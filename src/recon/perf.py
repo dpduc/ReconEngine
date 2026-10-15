@@ -99,7 +99,7 @@ def measure_once(sources: str | Path, config_path: str | Path) -> dict[str, Any]
     inspected = time.perf_counter()
     outcome = run(sources, config)
     ran = time.perf_counter()
-    bundle = outcome.bundle()
+    outcome.bundle()
     exported = time.perf_counter()
     performance = outcome.manifest["performance"]
     return {
@@ -110,7 +110,7 @@ def measure_once(sources: str | Path, config_path: str | Path) -> dict[str, Any]
         "cpu_seconds": time.process_time(),  # whole process: inspect + run + export
         "peak_rss_bytes": peak_rss_bytes(),
         "input_bytes": performance["input_bytes"],
-        "output_bytes": sum(len(text.encode("utf-8")) for text in bundle.values()),
+        "output_bytes": performance["output_bytes"],
         "stages": performance["stages"],
     }
 
@@ -196,7 +196,8 @@ def report(base_dir: str | Path, sizes: list[int], repeats: list[int], config_pa
                      f"{max(r['peak_rss_bytes'] for r in runs) / 1e9:.2f} | {size / p50:,.0f} |")
 
     largest = max(samples)
-    stage_medians = pd.DataFrame([r["stages"] for r in samples[largest]]).median().sort_values(ascending=False)
+    run_stages = [{k: v for k, v in r["stages"].items() if k != "export"} for r in samples[largest]]  # export: not `run`
+    stage_medians = pd.DataFrame(run_stages).median().sort_values(ascending=False)
     run_p50 = _pct([r["run_seconds"] for r in samples[largest]])[0]
     lines += ["", f"## Slowest stages at {largest:,} units (median seconds, share of `run`)", "",
               "| Stage | Seconds | Share |", "|---|---|---|"]

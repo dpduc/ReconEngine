@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -106,8 +107,13 @@ class ReconRun:
         return close_watchlist(self.results)
 
     def bundle(self) -> dict[str, str]:
-        """Downloadable artifacts keyed by file name."""
-        return {
+        """Downloadable artifacts keyed by file name.
+
+        Records the export in the manifest's `performance`: an `export` stage and `output_bytes`,
+        the size of every artifact but the manifest itself (which carries the number).
+        """
+        started = time.perf_counter()
+        files = {
             "decisions.csv": self.results.to_csv(index=False),
             "triage_queue.csv": self.results[self.results["decision"] == REVIEW].to_csv(index=False),
             "exception_queue.csv": self.exception_queue.to_csv(index=False),
@@ -115,5 +121,10 @@ class ReconRun:
             "close_watchlist.csv": self.close_watchlist.to_csv(index=False),
             "funnel.csv": self.funnel.to_csv(index=False),
             "excluded.csv": self.excluded.to_csv(index=False),
-            "manifest.json": json.dumps(self.manifest, indent=2, default=str),
         }
+        performance = self.manifest.get("performance")
+        if performance is not None:
+            performance["stages"]["export"] = round(time.perf_counter() - started, 6)
+            performance["output_bytes"] = sum(len(text.encode("utf-8")) for text in files.values())
+        files["manifest.json"] = json.dumps(self.manifest, indent=2, default=str)
+        return files

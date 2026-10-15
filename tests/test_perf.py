@@ -1,5 +1,6 @@
 """Runtime and cost measurement: per-stage timings in every manifest, scaled benchmarks, the report."""
 
+import json
 import os
 import shutil
 from pathlib import Path
@@ -11,7 +12,7 @@ from recon.olistdata import generate_from_olist
 from recon.perf import CostModel, _subprocess_env, main, pair_repeats, report, scale_benchmark
 from recon.pipeline import load_config, run
 
-from test_pipeline import write_sources
+from test_pipeline import OMS, write_sources
 
 ROOT = Path(__file__).parents[1]
 CONFIG = ROOT / "configs" / "olist_benchmark.json"
@@ -30,6 +31,28 @@ def test_every_run_records_stage_timings_cpu_and_peak_memory(tmp_path):
     assert performance["cpu_seconds"] > 0 and performance["peak_rss_bytes"] > 0
     assert performance["units"] == 3
     assert performance["input_bytes"] == sum((tmp_path / spec.path).stat().st_size for spec in config.feeds.values())
+
+
+def test_export_records_its_stage_and_output_size(tmp_path):
+    outcome = run(tmp_path, write_sources(tmp_path))
+
+    files = outcome.bundle()
+
+    performance = outcome.manifest["performance"]
+    assert performance["stages"]["export"] >= 0
+    assert performance["output_bytes"] == sum(len(text.encode("utf-8")) for name, text in files.items()
+                                              if name != "manifest.json") > 0
+    assert json.loads(files["manifest.json"])["performance"]["output_bytes"] == performance["output_bytes"]
+    assert "export" not in run(tmp_path, write_sources(tmp_path)).manifest["performance"]["stages"]
+
+
+def test_a_blocked_run_records_the_stages_that_ran(tmp_path):
+    outcome = run(tmp_path, write_sources(tmp_path, oms=OMS.replace("Amount", "Total")))
+
+    assert outcome.blocked
+    performance = outcome.manifest["performance"]
+    assert set(performance["stages"]) == {"load", "resolutions", "raw_checks", "parse_numeric", "checks", "profiles"}
+    assert performance["units"] == 0 and performance["input_bytes"] > 0 and performance["peak_rss_bytes"] > 0
 
 
 @pytest.fixture(scope="module")

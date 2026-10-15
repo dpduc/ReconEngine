@@ -6,6 +6,7 @@ import sys
 import time
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any
 
 
 class StageTimer:
@@ -26,6 +27,19 @@ class StageTimer:
 @contextmanager
 def nothing() -> Iterator[None]:
     yield
+
+
+def performance(timer: StageTimer, started: float, cpu_started: float, *, units: int,
+                input_bytes: int) -> dict[str, Any]:
+    """A run's manifest `performance` block; `started` / `cpu_started` are its perf_counter / process_time."""
+    return {
+        "units": units,
+        "input_bytes": input_bytes,
+        "total_seconds": round(time.perf_counter() - started, 6),
+        "cpu_seconds": round(time.process_time() - cpu_started, 6),
+        "peak_rss_bytes": peak_rss_bytes(),
+        "stages": {name: round(seconds, 6) for name, seconds in timer.stages.items()},
+    }
 
 
 def peak_rss_bytes() -> int:
