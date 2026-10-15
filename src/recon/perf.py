@@ -40,11 +40,12 @@ def scale_benchmark(source_dir: str | Path, out_dir: str | Path, units: int) -> 
     """Copy the generated benchmark to exactly `units` orders, replicating orders under fresh ids.
 
     Copy 0 keeps the original ids; copy k derives each id from (original id, k). Bank, logistics
-    and ground-truth rows follow their order, so every copy reconciles like its original.
+    and ground-truth rows follow their order, so every copy reconciles like its original. Rows
+    naming no order (orphans) are copied once, unscaled: replicating them would duplicate their keys.
     The output is deterministic and reused when it already exists for the same source and size.
     """
     source_dir, out_dir = Path(source_dir), Path(out_dir)
-    stamp = {"units": units, "source": hashlib.sha256(b"".join(
+    stamp = {"version": 2, "units": units, "source": hashlib.sha256(b"".join(
         hashlib.sha256((source_dir / name).read_bytes()).digest() for name in FILES)).hexdigest()}
     marker = out_dir / "scale.json"
     if marker.exists() and json.loads(marker.read_text(encoding="utf-8")) == stamp:
@@ -54,6 +55,11 @@ def scale_benchmark(source_dir: str | Path, out_dir: str | Path, units: int) -> 
     copies = math.ceil(units / len(oms))
     keys = {"oms": oms["order_id"], "bank": bank["txn_ref"].str.removeprefix("OLIST-PAY-"),
             "logistics": logistics["client_order_code"], "truth": truth["order_id"]}
+    feeds = {"bank": bank, "logistics": logistics, "truth": truth}
+    named = {name: keys[name].isin(oms["order_id"]) for name in feeds}
+    orphans = {name: frame[~named[name]] for name, frame in feeds.items()}
+    bank, logistics, truth = (frame[named[name]].reset_index(drop=True) for name, frame in feeds.items())
+    keys.update({name: keys[name][named[name]].reset_index(drop=True) for name in feeds})
     out = {name: [] for name in keys}
     for copy in range(copies):
         new = {old: _fresh_id(old, copy) for old in oms["order_id"]}
@@ -68,10 +74,12 @@ def scale_benchmark(source_dir: str | Path, out_dir: str | Path, units: int) -> 
     frames = {name: pd.concat(parts, ignore_index=True) for name, parts in out.items()}
     keep = set(frames["oms"]["order_id"].iloc[:units])
     frames["oms"] = frames["oms"].iloc[:units]
-    frames["bank"] = frames["bank"][frames["bank"]["txn_ref"].str.removeprefix("OLIST-PAY-").isin(keep)]
-    frames["logistics"] = frames["logistics"][frames["logistics"]["client_order_code"].isin(keep)]
-    frames["truth"] = frames["truth"][frames["truth"]["order_id"].isin(keep)].assign(
-        unit_id=lambda t: [str(i) for i in range(1, len(t) + 1)])
+    kept = {"bank": frames["bank"]["txn_ref"].str.removeprefix("OLIST-PAY-").isin(keep),
+            "logistics": frames["logistics"]["client_order_code"].isin(keep),
+            "truth": frames["truth"]["order_id"].isin(keep)}
+    for name, mask in kept.items():
+        frames[name] = pd.concat([frames[name][mask], orphans[name]], ignore_index=True)
+    frames["truth"] = frames["truth"].assign(unit_id=lambda t: [str(i) for i in range(1, len(t) + 1)])
     out_dir.mkdir(parents=True, exist_ok=True)
     for name, frame in zip(FILES, (frames["oms"], frames["bank"], frames["logistics"], frames["truth"])):
         frame.to_csv(out_dir / name, index=False)
@@ -128,11 +136,15 @@ class CostModel:
                 "total": compute + memory + storage + self.api_per_run}
 
 
+def _subprocess_env() -> dict[str, str]:
+    """This environment with our `src` first on PYTHONPATH (no empty entry: it would add the working dir)."""
+    paths = [str(Path(__file__).resolve().parents[1]), os.environ.get("PYTHONPATH", "")]
+    return {**os.environ, "PYTHONPATH": os.pathsep.join(path for path in paths if path)}
+
+
 def _measure_in_subprocess(sources: Path, config_path: Path) -> dict[str, Any]:
-    src = str(Path(__file__).resolve().parents[1])
-    env = {**os.environ, "PYTHONPATH": src + os.pathsep + os.environ.get("PYTHONPATH", "")}
     done = subprocess.run([sys.executable, "-m", "recon.perf", "once", str(sources), str(config_path)],
-                          capture_output=True, text=True, env=env, check=True)
+                          capture_output=True, text=True, env=_subprocess_env(), check=True)
     return json.loads(done.stdout.strip().splitlines()[-1])
 
 
@@ -148,12 +160,21 @@ def _machine() -> str:
             f"{os.cpu_count()} logical CPUs, Python {platform.python_version()}, pandas {pandas.__version__}")
 
 
+def pair_repeats(sizes: list[int], repeats: list[int]) -> list[int]:
+    """Repeats per size: one value for every size, or exactly one per size."""
+    if len(repeats) == 1:
+        return repeats * len(sizes)
+    if len(repeats) != len(sizes):
+        raise ValueError(f"--repeats needs one value or one per size ({len(sizes)}), got {len(repeats)}")
+    return list(repeats)
+
+
 def report(base_dir: str | Path, sizes: list[int], repeats: list[int], config_path: str | Path,
            work_dir: str | Path, cost: CostModel = CostModel()) -> str:
     """Measure each size `repeats` times (each in a fresh process) and return a markdown report."""
     work_dir, config_path = Path(work_dir), Path(config_path).resolve()
     samples: dict[int, list[dict[str, Any]]] = {}
-    for size, count in zip(sizes, repeats):
+    for size, count in zip(sizes, pair_repeats(sizes, repeats)):
         scaled = scale_benchmark(base_dir, work_dir / f"scaled_{size}", size)
         samples[size] = [_measure_in_subprocess(scaled, config_path) for _ in range(count)]
 
@@ -206,13 +227,18 @@ def main(argv: list[str] | None = None) -> None:
     rep.add_argument("--base", default="data/generated")
     rep.add_argument("--config", default="configs/olist_benchmark.json")
     rep.add_argument("--sizes", type=int, nargs="+", default=[100_000, 1_000_000])
-    rep.add_argument("--repeats", type=int, nargs="+", default=[10, 3])
+    rep.add_argument("--repeats", type=int, nargs="+", default=[10, 3],
+                     help="samples per size: one value for all sizes, or one per size")
     rep.add_argument("--work", default="data/scaled")
     rep.add_argument("--out", default="reports/performance.md")
     args = parser.parse_args(argv)
     if args.command == "once":
         print(json.dumps(measure_once(args.sources, args.config)))
         return
+    try:
+        pair_repeats(args.sizes, args.repeats)
+    except ValueError as error:
+        parser.error(str(error))
     markdown = report(args.base, args.sizes, args.repeats, args.config, args.work)
     Path(args.out).parent.mkdir(parents=True, exist_ok=True)
     Path(args.out).write_text(markdown, encoding="utf-8")

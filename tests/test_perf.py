@@ -1,12 +1,14 @@
 """Runtime and cost measurement: per-stage timings in every manifest, scaled benchmarks, the report."""
 
+import os
+import shutil
 from pathlib import Path
 
 import pandas as pd
 import pytest
 
 from recon.olistdata import generate_from_olist
-from recon.perf import CostModel, report, scale_benchmark
+from recon.perf import CostModel, _subprocess_env, main, pair_repeats, report, scale_benchmark
 from recon.pipeline import load_config, run
 
 from test_pipeline import write_sources
@@ -60,3 +62,45 @@ def test_report_gives_percentiles_matching_share_and_cost(small_benchmark, tmp_p
     for heading in ("P50", "P95", "P99", "Matching share", "Peak memory", "Cost per 1,000 units", "Slowest stages"):
         assert heading in markdown
     assert "| 300 |" in markdown and "| 600 |" in markdown
+
+
+def test_scaling_copies_orphan_rows_once(small_benchmark, tmp_path):
+    source = tmp_path / "source"
+    shutil.copytree(small_benchmark, source)
+    for name, column, value in (("bank_statement.csv", "txn_ref", "OLIST-PAY-" + "f" * 32),
+                                ("logistics_report.csv", "tracking_code", "ORPHAN-SHIPMENT")):
+        frame = pd.read_csv(source / name, dtype=str, keep_default_na=False)
+        orphan = frame.iloc[[0]].assign(**{column: value})
+        if name == "logistics_report.csv":
+            orphan = orphan.assign(client_order_code="NO-SUCH-ORDER")
+        pd.concat([frame, orphan]).to_csv(source / name, index=False)
+
+    scaled = scale_benchmark(source, tmp_path / "scaled", units=700)
+
+    bank = pd.read_csv(scaled / "bank_statement.csv", dtype=str)
+    logistics = pd.read_csv(scaled / "logistics_report.csv", dtype=str)
+    assert (bank["txn_ref"] == "OLIST-PAY-" + "f" * 32).sum() == 1
+    assert (logistics["tracking_code"] == "ORPHAN-SHIPMENT").sum() == 1
+    assert bank["txn_ref"].is_unique and logistics["tracking_code"].is_unique
+
+
+def test_one_repeats_value_applies_to_every_size_and_a_mismatch_fails():
+    assert pair_repeats([100, 200, 300], [5]) == [5, 5, 5]
+    assert pair_repeats([100, 200], [10, 3]) == [10, 3]
+    with pytest.raises(ValueError, match="one per size"):
+        pair_repeats([100, 200, 300], [10, 3])
+    with pytest.raises(SystemExit):  # the CLI refuses before measuring anything
+        main(["report", "--sizes", "100", "200", "300", "--repeats", "10", "3"])
+
+
+@pytest.mark.parametrize("existing", [None, "", "elsewhere"])
+def test_subprocess_path_has_no_empty_entry(monkeypatch, existing):
+    if existing is None:
+        monkeypatch.delenv("PYTHONPATH", raising=False)
+    else:
+        monkeypatch.setenv("PYTHONPATH", existing)
+
+    entries = _subprocess_env()["PYTHONPATH"].split(os.pathsep)
+
+    assert all(entries) and entries[0] == str(ROOT / "src")
+    assert entries[1:] == ([existing] if existing else [])
