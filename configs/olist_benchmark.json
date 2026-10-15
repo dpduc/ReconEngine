@@ -54,5 +54,6 @@
     {"issue_id": "placeholder_timestamp:logistics:delivered_at:status=SHIPPED", "option": "acknowledge", "params": {},
      "note": "Shipped-not-delivered rows carry the estimated delivery date at 00:00:00, not a real delivery event."}
   ],
-  "ground_truth": "ground_truth.csv"
+  "ground_truth": "ground_truth.csv",
+  "link_truth": "links.csv"
 }

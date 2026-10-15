@@ -55,6 +55,7 @@ def generate_from_olist(
     oms_rows: list[dict] = []
     bank_rows: list[dict] = []
     logistics_rows: list[dict] = []
+    link_rows: list[dict] = []
     for unit_id, row in enumerate(eligible.itertuples(index=False), start=1):
         order_id = row.order_id
         amount = float(row.order_amount) if pd.notna(row.order_amount) else None
@@ -114,6 +115,8 @@ def generate_from_olist(
                 "fee_amount": 0.0, "net_amount": payment,
                 "installments": installments, "payment_type": row.payment_type, "interest_amount": interest,
             })
+            link_rows.append({"feed": "bank", "record_key": f"OLIST-PAY-{order_id}", "order_id": order_id,
+                              "link_kind": "order_ref"})
         if has_shipment:
             logistics_rows.append({
                 "tracking_code": tracking, "client_order_code": order_id,
@@ -126,6 +129,8 @@ def generate_from_olist(
                 "delivered_at": pd.Timestamp(delivered_at).isoformat()
                 if not pd.isna(delivered_at) else "",
             })
+            link_rows.append({"feed": "logistics", "record_key": tracking, "order_id": order_id,
+                              "link_kind": "order_ref"})
         truth_rows.append({
             "unit_id": unit_id, "scenario": scenario, "sub_kind": scenario,
             "expected_outcome": expected_outcome, "expected_exception": expected_exception,
@@ -139,6 +144,7 @@ def generate_from_olist(
         "bank_statement.csv": pd.DataFrame(bank_rows),
         "logistics_report.csv": pd.DataFrame(logistics_rows),
         "ground_truth.csv": pd.DataFrame(truth_rows),
+        "links.csv": pd.DataFrame(link_rows, columns=["feed", "record_key", "order_id", "link_kind"]),
     }
     files = {}
     for name, frame in frames.items():
@@ -147,7 +153,7 @@ def generate_from_olist(
         files[name] = {"rows": len(frame), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
     manifest = {
         "generator": "recon.olistdata",
-        "generator_version": "1.2.0",
+        "generator_version": "1.3.0",
         "source": "brazil ecom",
         "source_files": ["olist_orders_dataset.csv", "olist_order_items_dataset.csv", "olist_order_payments_dataset.csv"],
         "seed": seed, "units": len(truth_rows), "currency": "BRL",

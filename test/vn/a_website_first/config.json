@@ -59,5 +59,6 @@
     }
   },
   "resolutions": [],
-  "ground_truth": "ground_truth.csv"
+  "ground_truth": "ground_truth.csv",
+  "link_truth": "links.csv"
 }

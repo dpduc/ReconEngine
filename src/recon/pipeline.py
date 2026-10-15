@@ -25,7 +25,7 @@ from recon.config import (
     load_config,
     save_config,
 )
-from recon.evaluation import attach_truth, metrics
+from recon.evaluation import attach_truth, link_metrics, metrics
 from recon.funnel import RULE_VERSION, STEPS, FunnelContext, build_units, run_funnel
 from recon.funnel.fx import read_rate_table
 from recon.guidance import Guidance, guide
@@ -180,13 +180,19 @@ def _run(sources: Sources, config: RunConfig, meter: RunMeter) -> ReconRun:
             truth = read_source(sources, config.ground_truth)
             results = attach_truth(results, pd.read_csv(io.BytesIO(truth)))
         input_files["ground_truth"] = {"path": config.ground_truth, "sha256": sha256(truth)}
+    links = None
+    if config.link_truth:
+        with timer.stage("link_truth"):
+            link_truth = read_source(sources, config.link_truth)
+            links = link_metrics(results, pd.read_csv(io.BytesIO(link_truth), dtype=str, keep_default_na=False))
+        input_files["link_truth"] = {"path": config.link_truth, "sha256": sha256(link_truth)}
     manifest = {
         "rule_version": RULE_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "input_files": input_files,
         "run_config": config.to_dict(),
         "metrics": {**metrics(results), "orphans": orphan_counts(orphans),
-                    "close_watchlist": watchlist_summary(results)},
+                    "close_watchlist": watchlist_summary(results), **({"links": links} if links else {})},
         "excluded_rows": {k: int(v) for k, v in prepared.excluded["feed"].value_counts().items()},
     }
     manifest["performance"] = meter.performance(units=int(len(results)), input_bytes=input_bytes)
