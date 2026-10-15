@@ -25,7 +25,8 @@
       "tracking_no": "tracking_no",
       "payment_method": "payment_method",
       "order_amount": "order_amount",
-      "ordered_at": "ordered_at"
+      "ordered_at": "ordered_at",
+      "customer_name": "customer_name"
     },
     "bank": {
       "txn_ref": "txn_ref",
@@ -50,6 +51,7 @@
       "wallet": 110
     },
     "cod_fee_bps": 80,
+    "payer_pattern": "^[A-Z]+\\.\\d+\\.(?P<payer>[A-Z ]+?) chuyen tien",
     "amount_tolerance": 1000,
     "status_policy": {
       "delivered": [

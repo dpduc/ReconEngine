@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
@@ -51,6 +52,9 @@ class Policy:
     # order status -> the EVIDENCE it requires; unlisted statuses are pending policy
     status_policy: dict[str, tuple[str, ...]] = field(default_factory=_default_status_policy)
     fx: FxPolicy | None = None  # None: credits in another currency than their order are not compared
+    # Regex with a named group `payer` that finds the payer in a bank description, for feeds without a
+    # payer_name column. None: credits have no payer name, and pass 2 ignores who paid.
+    payer_pattern: str | None = None
 
     def __post_init__(self) -> None:
         if isinstance(self.fx, dict):
@@ -60,6 +64,8 @@ class Policy:
             raise ValueError(f"unknown evidence in status_policy: {sorted(unknown)}")
         normalized = {str(status): tuple(required) for status, required in self.status_policy.items()}
         object.__setattr__(self, "status_policy", normalized)
+        if self.payer_pattern is not None and "payer" not in re.compile(self.payer_pattern).groupindex:
+            raise ValueError("payer_pattern needs a named group 'payer', e.g. (?P<payer>[A-Z ]+)")
         rates = {str(kind): int(bps) for kind, bps in self.payment_type_fee_bps.items()}
         object.__setattr__(self, "payment_type_fee_bps", rates)
 
