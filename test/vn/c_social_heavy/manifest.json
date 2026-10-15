@@ -1,0 +1,172 @@
+{
+  "generator": "recon.channeldata",
+  "generator_version": "2.0.0",
+  "market": "vn",
+  "source": "brazil ecom",
+  "source_files": [
+    "olist_orders_dataset.csv",
+    "olist_order_items_dataset.csv",
+    "olist_order_payments_dataset.csv"
+  ],
+  "seed": 42,
+  "profile": {
+    "name": "c_social_heavy",
+    "description": "Facebook first: COD with frequent returns, transfers with free-text notes.",
+    "month": "2026-06",
+    "orders": 400,
+    "mix": {
+      "facebook": 0.55,
+      "website": 0.2,
+      "shopee": 0.15,
+      "tiktok": 0.1
+    },
+    "rates": {
+      "wallet_missing": 0.005,
+      "wallet_short": 0.005,
+      "wallet_fee_over": 0.005,
+      "transfer_typo": 0.1,
+      "transfer_split": 0.1,
+      "transfer_short": 0.05,
+      "transfer_duplicate": 0.03,
+      "transfer_unpaid": 0.03,
+      "transfer_other_payer": 0.12,
+      "cod_short": 0.02,
+      "cod_returned": 0.12,
+      "cod_fee_over": 0.01,
+      "missing_shipment": 0.02,
+      "market_fee_over": 0.02,
+      "market_return": 0.02
+    },
+    "non_sales_credits": 5
+  },
+  "assumptions": {
+    "price_scale": 2500,
+    "freight_scale": 1500,
+    "freight_min": 15000,
+    "freight_max": 60000,
+    "time_scale": 0.3,
+    "website_cod": 0.5,
+    "website_transfer": 0.35,
+    "facebook_cod": 0.65,
+    "wallet_mdr_bps": 110,
+    "cod_fee_bps": 80,
+    "return_fee_share": 0.5,
+    "cod_payout_weekdays": [
+      0,
+      2,
+      4
+    ],
+    "shopee_fixed_rate": 0.08,
+    "shopee_payment_rate": 0.05,
+    "shopee_release_days": 3,
+    "shopee_payout_weekdays": [
+      1
+    ],
+    "tiktok_commission": 0.06,
+    "tiktok_transaction_fee": 0.04,
+    "tiktok_release_days": 7,
+    "tiktok_payout_weekdays": [
+      0,
+      3
+    ],
+    "overcharge_points": 0.02
+  },
+  "date_shift_days": 2926,
+  "period": {
+    "orders": [
+      "2026-06-01",
+      "2026-06-30"
+    ],
+    "statement": [
+      "2026-06-01",
+      "2026-07-15"
+    ]
+  },
+  "currency": "VND",
+  "units": 365,
+  "orders_by_channel": {
+    "facebook": 211,
+    "website": 69,
+    "shopee": 49,
+    "tiktok": 36
+  },
+  "scenario_counts": {
+    "MATCHED": 301,
+    "COD_RETURNED_NOT_IN_OMS": 22,
+    "PAYER_NAME_DIFFERS": 12,
+    "SPLIT_PAYMENT": 11,
+    "MISSING_SHIPMENT": 4,
+    "FEE_OVERCHARGE": 3,
+    "COD_SHORT": 2,
+    "DUPLICATE_PAYMENT": 2,
+    "PENDING_SETTLEMENT": 2,
+    "SHORT_TRANSFER": 2,
+    "COD_FEE_OVERCHARGE": 1,
+    "RETURN_NOT_IN_OMS": 1,
+    "MISSING_PAYMENT": 1,
+    "STATUS_PENDING_POLICY": 1
+  },
+  "settlement_keys": {
+    "shopee_settlement.csv": [
+      "Mã đơn hàng",
+      "Mã thanh toán",
+      "Tổng tiền đã thanh toán"
+    ],
+    "tiktok_settlement.csv": [
+      "Order ID",
+      "Statement ID",
+      "Total settlement amount"
+    ]
+  },
+  "simulated": {
+    "dates": "Olist dates shifted by 2926 days (418 weeks), so the channels exist in the period",
+    "channels": "channels, payment routes, fees, payouts, carriers and settlement reports are simulated; order timing, volume shape, statuses and the price spread are Olist's",
+    "orders": "a seeded sample of the month's Olist orders across all Olist sellers",
+    "prices": "Olist item prices x price_scale VND/BRL and freight x freight_scale (clipped), rounded to 1,000 VND: Vietnamese order values, not the FX rate",
+    "times": "times after purchase compressed by time_scale, so deliveries take a few days",
+    "order_id": "seller order codes ORDyyyy-nnnnnnn; ground_truth.source_order_id is the Olist id",
+    "customer_name": "synthetic Vietnamese names (Olist has none); bank lines print them without diacritics"
+  },
+  "files": {
+    "oms_orders.csv": {
+      "rows": 365,
+      "sha256": "643070c311bba18925a0720c433dcdde58d42bb87e9ea6b541b7e272c9c814aa"
+    },
+    "bank_statement.csv": {
+      "rows": 187,
+      "sha256": "a871ddc7745f8bc0a857b84aa634509031afd7a78e5a0d163ee2795f9f97b475"
+    },
+    "logistics_report.csv": {
+      "rows": 327,
+      "sha256": "5b36121159b44c162ea87621cc127c2c047374f99daba90c333be48e97148197"
+    },
+    "shopee_settlement.csv": {
+      "rows": 78,
+      "sha256": "efa0ec74df94bff3f9ff135819b1c7f9bc3cdb13f5e2c71a640729bee9d99088"
+    },
+    "tiktok_settlement.csv": {
+      "rows": 54,
+      "sha256": "cef3853fab5051730fc75e98cb1d0a7957921c3fbf39642e27bc3632a33cca12"
+    },
+    "ground_truth.csv": {
+      "rows": 365,
+      "sha256": "c4f70bcfce0bc488b064246a15194222eed74d06f7e0e0f3ad16c27802220917"
+    },
+    "links.csv": {
+      "rows": 1026,
+      "sha256": "a893eeb7d8af7a40ff9a972512ead27af5a547235c8b0cf19b11ebe72c55f9dc"
+    }
+  },
+  "baseline": {
+    "status": "COMPLETED",
+    "warnings_acknowledged": 8,
+    "decisions": {
+      "EXCEPTION": 300,
+      "REVIEW": 46,
+      "AUTO_ACCEPT": 19
+    },
+    "accuracy": 0.1780821917808219,
+    "auto_accept_precision": 0.8421052631578947,
+    "orphans": 130
+  }
+}
