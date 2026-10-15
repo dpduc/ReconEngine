@@ -189,6 +189,18 @@ Recall rounds to 1.00 for `MISSING_SOURCE_EVIDENCE` (775 of 776). Quality is jud
 accuracy: 96% of orders match, so labelling every order as matched would
 already score about 96%.
 
+**Link metrics.** A config can name a link-truth file (`link_truth`: feed, record key, order, link kind). The manifest
+then reports:
+
+- **Links:** precision per linking pass and recall per feed and per true link kind.
+- **Pass-3 candidates:** how often the true bank line is the best one proposed, or among those proposed.
+- **Money:** for each reason code, the amount caught and the amount missed.
+
+On the Olist benchmark, all 196,078 links are made in pass 1 and are correct.
+
+The Vietnamese multi-channel sets (`test/vn`) record a link baseline in their manifests. Linking by order reference is
+correct, but recall is 23–52% because marketplace payouts and COD remittances can't be linked yet.
+
 **Known gaps in the benchmark:**
 
 - **Simulated interest column:** the real Olist payment total exceeds items + freight on some installment orders: interest on installments. Olist has no interest column, so the generator adds `interest_amount` to the bank feed, as PSP statements report it (real payment total minus the order amount on those orders). Without that column the engine cannot tell interest from an overpayment: a band-only rule would also have auto-accepted 521 of the 977 injected `AMOUNT_ERROR`s. Feeds that report installments but no interest get `POSSIBLE_INSTALLMENT_INTEREST` (REVIEW) instead.

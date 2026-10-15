@@ -91,6 +91,7 @@ class RunConfig:
     policy: Policy = Policy()
     resolutions: tuple[Resolution, ...] = ()
     ground_truth: str | None = None  # optional truth CSV, relative to the sources folder
+    link_truth: str | None = None  # optional true links CSV (feed, record_key, order_id[, link_kind])
 
     @property
     def resolved_policy(self) -> Policy:
@@ -124,6 +125,7 @@ class RunConfig:
             policy=Policy(**data.get("policy", {})),
             resolutions=tuple(Resolution(**r) for r in data.get("resolutions", [])),
             ground_truth=data.get("ground_truth"),
+            link_truth=data.get("link_truth"),
         )
 
     def to_json(self) -> str:

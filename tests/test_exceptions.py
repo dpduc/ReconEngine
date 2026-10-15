@@ -122,10 +122,17 @@ def test_precision_and_recall_per_reason_code_against_truth(tmp_path):
     config = replace(write_sources(tmp_path), ground_truth="truth.csv")
     per_code = run(tmp_path, acknowledged(tmp_path, config)).manifest["metrics"]["per_reason_code"]
 
+    # Amount-weighted on the order amounts: order 2 is 50.00, order 3 is 70.00.
     assert per_code["AMOUNT_MISMATCH"] == {"predicted": 1, "actual": 2, "true_positives": 1,
-                                           "precision": 1.0, "recall": 0.5}
+                                           "precision": 1.0, "recall": 0.5,
+                                           "amount_predicted": 50.0, "amount_actual": 120.0,
+                                           "amount_caught": 50.0, "amount_missed": 70.0,
+                                           "amount_precision": 1.0, "amount_recall": 50 / 120}
     assert per_code["MISSING_PAYMENT"] == {"predicted": 1, "actual": 0, "true_positives": 0,
-                                           "precision": 0.0, "recall": None}
+                                           "precision": 0.0, "recall": None,
+                                           "amount_predicted": 70.0, "amount_actual": 0.0,
+                                           "amount_caught": 0.0, "amount_missed": 0.0,
+                                           "amount_precision": 0.0, "amount_recall": None}
     assert "THREE_WAY_TIE_OUT" not in per_code
 
 

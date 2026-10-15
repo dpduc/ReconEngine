@@ -26,7 +26,7 @@ import pandas as pd
 from recon.funnel import MATCHING_GROUPS, STEP_GROUPS
 from recon.timing import process_peak_rss_bytes
 
-FILES = ("oms_orders.csv", "bank_statement.csv", "logistics_report.csv", "ground_truth.csv")
+FILES = ("oms_orders.csv", "bank_statement.csv", "logistics_report.csv", "ground_truth.csv", "links.csv")
 FUNNEL_PREFIX = "funnel:"
 UNTIMED = "untimed"  # `run` time outside every recorded stage
 
@@ -56,19 +56,19 @@ def scale_benchmark(source_dir: str | Path, out_dir: str | Path, units: int) -> 
     The output is deterministic and reused when it already exists for the same source and size.
     """
     source_dir, out_dir = Path(source_dir), Path(out_dir)
-    stamp = {"version": 2, "units": units, "source": hashlib.sha256(b"".join(
+    stamp = {"version": 3, "units": units, "source": hashlib.sha256(b"".join(
         hashlib.sha256((source_dir / name).read_bytes()).digest() for name in FILES)).hexdigest()}
     marker = out_dir / "scale.json"
     if marker.exists() and json.loads(marker.read_text(encoding="utf-8")) == stamp:
         return out_dir
-    oms, bank, logistics, truth = (_read(source_dir, name) for name in FILES)
+    oms, bank, logistics, truth, links = (_read(source_dir, name) for name in FILES)
     copies = math.ceil(units / len(oms))
     keys = {"oms": oms["order_id"], "bank": bank["txn_ref"].str.removeprefix("OLIST-PAY-"),
-            "logistics": logistics["client_order_code"], "truth": truth["order_id"]}
-    feeds = {"bank": bank, "logistics": logistics, "truth": truth}
+            "logistics": logistics["client_order_code"], "truth": truth["order_id"], "links": links["order_id"]}
+    feeds = {"bank": bank, "logistics": logistics, "truth": truth, "links": links}
     named = {name: keys[name].isin(oms["order_id"]) for name in feeds}
     orphans = {name: frame[~named[name]] for name, frame in feeds.items()}
-    bank, logistics, truth = (frame[named[name]].reset_index(drop=True) for name, frame in feeds.items())
+    bank, logistics, truth, links = (frame[named[name]].reset_index(drop=True) for name, frame in feeds.items())
     keys.update({name: keys[name][named[name]].reset_index(drop=True) for name in feeds})
     out = {name: [] for name in keys}
     for copy in range(copies):
@@ -78,17 +78,19 @@ def scale_benchmark(source_dir: str | Path, out_dir: str | Path, units: int) -> 
         out["logistics"].append(_rename_ids(logistics, keys["logistics"],
                                             ["tracking_code", "client_order_code", "remittance_id"], new))
         out["truth"].append(_rename_ids(truth, keys["truth"], ["order_id", "tracking_no", "bank_txn_ref"], new))
+        out["links"].append(_rename_ids(links, keys["links"], ["record_key", "order_id"], new))
     frames = {name: pd.concat(parts, ignore_index=True) for name, parts in out.items()}
     keep = set(frames["oms"]["order_id"].iloc[:units])
     frames["oms"] = frames["oms"].iloc[:units]
     kept = {"bank": frames["bank"]["txn_ref"].str.removeprefix("OLIST-PAY-").isin(keep),
             "logistics": frames["logistics"]["client_order_code"].isin(keep),
-            "truth": frames["truth"]["order_id"].isin(keep)}
+            "truth": frames["truth"]["order_id"].isin(keep), "links": frames["links"]["order_id"].isin(keep)}
     for name, mask in kept.items():
         frames[name] = pd.concat([frames[name][mask], orphans[name]], ignore_index=True)
     frames["truth"] = frames["truth"].assign(unit_id=lambda t: [str(i) for i in range(1, len(t) + 1)])
     out_dir.mkdir(parents=True, exist_ok=True)
-    for name, frame in zip(FILES, (frames["oms"], frames["bank"], frames["logistics"], frames["truth"])):
+    for name, frame in zip(FILES, (frames["oms"], frames["bank"], frames["logistics"], frames["truth"],
+                                   frames["links"])):
         frame.to_csv(out_dir / name, index=False)
     marker.write_text(json.dumps(stamp), encoding="utf-8")
     return out_dir

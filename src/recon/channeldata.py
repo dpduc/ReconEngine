@@ -42,7 +42,7 @@ import pandas as pd
 
 from recon.contracts import fee as vnd_fee
 
-GENERATOR_VERSION = "2.0.0"
+GENERATOR_VERSION = "2.1.0"
 SOURCE_FILES = ("olist_orders_dataset.csv", "olist_order_items_dataset.csv", "olist_order_payments_dataset.csv")
 DATE_SHIFT = pd.Timedelta(days=2926)  # 418 weeks: weekdays kept, Black Friday 2017 -> Black Friday 2025
 DATE_COLUMNS = ("order_purchase_timestamp", "order_approved_at", "order_delivered_carrier_date",
@@ -966,6 +966,7 @@ def config_for(market: Market) -> dict[str, Any]:
                    "status_policy": {"delivered": ["payment", "shipment"], "shipped": ["payment", "shipment"]}},
         "resolutions": [],
         "ground_truth": "ground_truth.csv",
+        "link_truth": "links.csv",
     }
 
 
@@ -983,10 +984,13 @@ def baseline(set_dir: str | Path) -> dict[str, Any]:
     if outcome.blocked:
         return {"status": "BLOCKED", "blocking": [issue.id for issue in outcome.open_issues]}
     scored = metrics(outcome.results)
+    links = outcome.manifest["metrics"]["links"]
     return {"status": "COMPLETED", "warnings_acknowledged": len(config.resolutions),
             "decisions": outcome.results["decision"].value_counts().to_dict(),
             "accuracy": scored["accuracy"], "auto_accept_precision": scored["auto_accept_precision"],
-            "orphans": int(len(outcome.orphans))}
+            "orphans": int(len(outcome.orphans)),
+            "links": {"precision": links["overall"]["precision"], "recall": links["overall"]["recall"],
+                      "recall_per_link_kind": {kind: row["recall"] for kind, row in links["per_link_kind"].items()}}}
 
 
 def generate(source_dir: str | Path, out_dir: str | Path, *, market: str = "vn", seed: int = 42,
