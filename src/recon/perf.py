@@ -96,7 +96,7 @@ def measure_once(sources: str | Path, config_path: str | Path) -> dict[str, Any]
     from recon.pipeline import inspect, load_config, run
 
     config = load_config(config_path)
-    started = time.perf_counter()
+    started, cpu_started = time.perf_counter(), time.process_time()  # after imports and config: the work only
     inspect(sources, config)
     inspected = time.perf_counter()
     outcome = run(sources, config)
@@ -109,7 +109,7 @@ def measure_once(sources: str | Path, config_path: str | Path) -> dict[str, Any]
         "inspect_seconds": inspected - started,
         "run_seconds": ran - inspected,
         "export_seconds": exported - ran,
-        "cpu_seconds": time.process_time(),  # whole process: inspect + run + export
+        "cpu_seconds": time.process_time() - cpu_started,  # inspect + run + export
         "peak_rss_bytes": process_peak_rss_bytes(),  # a fresh process per sample: its lifetime peak
         "input_bytes": performance["input_bytes"],
         "output_bytes": performance["output_bytes"],
@@ -136,6 +136,19 @@ class CostModel:
         storage = (sample["input_bytes"] + sample["output_bytes"]) / 1e9 * self.storage_gb_month * self.retention_months
         return {"compute": compute, "memory": memory, "storage": storage, "api": self.api_per_run,
                 "total": compute + memory + storage + self.api_per_run}
+
+
+COST_COMPONENTS = ("compute", "memory", "storage", "api")
+
+
+def _dominance(units: int, costs: pd.Series, cost: CostModel) -> str:
+    """One sentence naming the component that dominates the cost per run."""
+    component = max(COST_COMPONENTS, key=lambda name: costs[name])
+    sentence = f"At {units:,} units, {component} is {costs[component] / costs['total']:.0%} of the cost per run"
+    if component == "storage":
+        return (sentence + f"; it follows the assumed retention of {cost.retention_months} months, so compare "
+                "compute + memory per 1,000 units for the cost of reconciling itself.")
+    return sentence + "."
 
 
 def _subprocess_env() -> dict[str, str]:
@@ -260,15 +273,26 @@ def render_report(samples: dict[int, list[dict[str, Any]]], cost: CostModel = Co
 
     lines += ["", "## Cost per reconciliation", "",
               "Assumed prices (replace with your own): " + ", ".join(f"`{k}` = {v}" for k, v in asdict(cost).items())
-              + ". Compute is CPU-seconds of the whole process; memory is peak memory held for the wall time; "
-              "storage keeps inputs and the export bundle for the retention period. No external API is called.", "",
+              + ". Compute is the CPU-seconds of inspect, run and export (not process startup or imports); "
+              "memory is the peak memory held for the wall time; storage keeps the inputs and the export bundle "
+              "for the retention period, which is an assumption. No external API is called. Costs are medians "
+              "over samples; per 1,000 units divides by the units each sample measured.", "",
               "| Units | Compute ($) | Memory ($) | Storage ($) | API ($) | Total per run ($) "
-              "| Cost per 1,000 units ($) |",
-              "|---|---|---|---|---|---|---|"]
+              "| Compute + memory per 1,000 units ($) | Storage per 1,000 units ($) | Total per 1,000 units ($) "
+              "| Compute / memory / storage share |",
+              "|---|---|---|---|---|---|---|---|---|---|"]
     for size, runs in samples.items():
         costs = pd.DataFrame([cost.per_run(r) for r in runs]).median()
-        lines.append(f"| {size:,} | {costs['compute']:.5f} | {costs['memory']:.5f} | {costs['storage']:.5f} | "
-                     f"{costs['api']:.5f} | {costs['total']:.5f} | {costs['total'] / size * 1000:.6f} |")
+        per_1000 = pd.DataFrame([{name: value / max(r["units"], 1) * 1000 for name, value in cost.per_run(r).items()}
+                                 for r in runs]).median()
+        units = int(np.median([r["units"] for r in runs]))
+        shares = " / ".join(f"{costs[name] / costs['total']:.0%}" for name in ("compute", "memory", "storage"))
+        lines.append(f"| {units:,} | {costs['compute']:.5f} | {costs['memory']:.5f} | {costs['storage']:.5f} | "
+                     f"{costs['api']:.5f} | {costs['total']:.5f} | {per_1000['compute'] + per_1000['memory']:.6f} | "
+                     f"{per_1000['storage']:.6f} | {per_1000['total']:.6f} | {shares} |")
+    largest_runs = samples[max(samples)]
+    lines += ["", _dominance(int(np.median([r["units"] for r in largest_runs])),
+                             pd.DataFrame([cost.per_run(r) for r in largest_runs]).median(), cost)]
 
     lines += ["", "## Appendix: time per stage (seconds)", "",
               "Stages in pipeline order; percentiles are over the samples that ran the stage.", "",

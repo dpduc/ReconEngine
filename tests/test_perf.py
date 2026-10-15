@@ -3,6 +3,7 @@
 import json
 import os
 import shutil
+import time
 from pathlib import Path
 
 import pandas as pd
@@ -10,7 +11,7 @@ import pytest
 
 from recon.olistdata import generate_from_olist
 from recon.funnel import STEP_GROUPS, STEPS
-from recon.perf import (CostModel, _subprocess_env, main, matching_share, pair_repeats, render_report, report,
+from recon.perf import (CostModel, _subprocess_env, main, matching_share, measure_once, pair_repeats, render_report, report,
                         run_groups, scale_benchmark)
 from recon.pipeline import load_config, run
 from recon.timing import RunMeter, process_peak_rss_bytes
@@ -129,6 +130,26 @@ def test_report_gives_p50_p95_p99_overall_and_per_stage():
     assert "| 1,000 | 6 | Run | 7.000 | 11.500 | 11.900 |" in lines
     assert "| 1,000 | `load` | 3.500 | 5.750 | 5.950 |" in lines
     assert "| 1,000 | `export` | 0.300 | 0.480 | 0.496 |" in lines  # only five samples ran it
+
+
+def test_cost_per_1000_units_divides_by_measured_units_and_splits_compute_from_storage():
+    runs = [{**_sample(1.0), "units": 500}]  # asked for 1,000, measured 500
+    cost = CostModel(vcpu_hour=3600.0, gb_hour=0.0, storage_gb_month=1000.0, retention_months=1)
+
+    markdown = render_report({1000: runs}, cost)
+
+    # compute: 1 CPU-second x $1/s = $1; storage: 2 MB x $1000/GB = $2 -> per 1,000 measured units: $2 and $4
+    assert "| 500 | 1.00000 | 0.00000 | 2.00000 | 0.00000 | 3.00000 | 2.000000 | 4.000000 | 6.000000 | " \
+           "33% / 0% / 67% |" in markdown
+    assert "At 500 units, storage is 67% of the cost per run; it follows the assumed retention of 1 months" in markdown
+
+
+def test_measured_cpu_excludes_what_ran_before_the_work(small_benchmark):
+    before = time.process_time()
+
+    sample = measure_once(small_benchmark, CONFIG)
+
+    assert 0 < sample["cpu_seconds"] <= time.process_time() - before
 
 
 def test_every_funnel_step_has_a_group():
