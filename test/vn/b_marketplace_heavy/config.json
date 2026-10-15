@@ -1,0 +1,63 @@
+{
+  "feeds": {
+    "oms": {
+      "path": "oms_orders.csv",
+      "format": "csv",
+      "encoding": "utf-8",
+      "date_format": null
+    },
+    "bank": {
+      "path": "bank_statement.csv",
+      "format": "csv",
+      "encoding": "utf-8",
+      "date_format": null
+    },
+    "logistics": {
+      "path": "logistics_report.csv",
+      "format": "csv",
+      "encoding": "utf-8",
+      "date_format": null
+    }
+  },
+  "mapping": {
+    "oms": {
+      "order_id": "order_id",
+      "tracking_no": "tracking_no",
+      "payment_method": "payment_method",
+      "order_amount": "order_amount",
+      "ordered_at": "ordered_at"
+    },
+    "bank": {
+      "txn_ref": "txn_ref",
+      "description": "description",
+      "credit_amount": "credit_amount",
+      "fee_amount": "fee_amount",
+      "net_amount": "net_amount",
+      "value_date": "value_date"
+    },
+    "logistics": {
+      "tracking_code": "tracking_code",
+      "client_order_code": "client_order_code",
+      "cod_collected": "cod_collected",
+      "ship_fee": "ship_fee",
+      "cod_fee": "cod_fee"
+    }
+  },
+  "policy": {
+    "mdr_bps": 110,
+    "cod_fee_bps": 80,
+    "amount_tolerance": 1000,
+    "status_policy": {
+      "delivered": [
+        "payment",
+        "shipment"
+      ],
+      "shipped": [
+        "payment",
+        "shipment"
+      ]
+    }
+  },
+  "resolutions": [],
+  "ground_truth": "ground_truth.csv"
+}
