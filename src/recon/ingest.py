@@ -111,6 +111,7 @@ class LoadedFeed:
     path: str  # as written in the run config, relative to the sources
     sha256: str
     frame: pd.DataFrame  # canonical columns + unmapped pass-through columns + lineage
+    size_bytes: int  # raw bytes read
 
 
 def sha256(data: bytes) -> str:
@@ -144,7 +145,7 @@ def load_feed(name: str, sources: Sources, spec: FeedSpec, mapping: dict[str, st
     frame[SOURCE_ROW] = np.arange(1, len(frame) + 1)
     frame[ROW_HASH] = _row_hashes(raw)
     frame[INGESTED_AT] = ingested_at or datetime.now(timezone.utc).isoformat(timespec="seconds")
-    return LoadedFeed(name, spec.path, sha256(data), frame)
+    return LoadedFeed(name, spec.path, sha256(data), frame, len(data))
 
 
 def parse_dates(values: pd.Series, date_format: str | None = None, utc: bool = False) -> pd.Series:

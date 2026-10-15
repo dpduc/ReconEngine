@@ -196,6 +196,28 @@ already score about 96%.
 - **Timing mismatches have no labels:** the 30 picked-after-delivered shipments are real anomalies in the data, but the ground truth has no label for them.
 - **Rules the benchmark can't exercise:** the benchmark is 100% prepaid, with one transaction and one shipment per order. The COD, fee, constrained-link and duplicate rules are therefore covered only by the hand-built test fixtures.
 
+## Performance and cost
+
+```powershell
+python -m recon.perf report --sizes 100000 1000000 --repeats 10 3
+```
+
+The harness copies the Olist benchmark up to each size. Each sample is a fresh process
+that runs inspect, run and export, as the app does. Every run also records its stage
+timings, CPU time, peak memory and input/output size in `manifest["performance"]`.
+Measured on Windows 11, an Intel Ice Lake CPU (8 logical CPUs), Python 3.12, pandas 3.0.
+Full results: [reports/performance.md](reports/performance.md).
+
+| Units | Samples | Overall P50 / P95 / P99 (s) | `run` P50 / P95 / P99 (s) | Peak memory | Matching share |
+|---|---|---|---|---|---|
+| 100,000 | 10 | 40 / 51 / 51 | 22 / 28 / 29 | 0.85 GB | 21% |
+| 1,000,000 | 3 | 535 / 554 / 556 | 295 / 330 / 333 | 7.1 GB | 21% |
+
+- **Overall** is what the user waits for: inspect + run + export. At 1M units: inspect 151 s, export 69 s.
+- **Matching share** is linking + rule-check time over `run`.
+- **Dominant stages:** at 1M units, the checks (29%) and loading (28%) take most of `run`. Linking takes 18%, the decision step 8%, and rule checks 3%.
+- **Cost per 1,000 units:** compute + memory is $0.00001 and storage is $0.0005 (98% of the total). The prices are assumptions (AWS Fargate and S3 Standard, us-east-1), and so is the 12-month retention, which drives the storage cost. Replace them with your own in `recon.perf.CostModel`.
+
 ## Project layout
 
 ```
@@ -213,6 +235,8 @@ src/recon/
 ├── results.py        # ReconRun, exception queue, export bundle
 ├── evaluation.py     # ground truth, per-reason-code metrics
 ├── olistdata.py      # builds the Olist benchmark feeds
+├── perf.py           # runtime and cost harness, writes reports/performance.md
+├── timing.py         # stage timer and per-run peak memory
 └── mockdata.py       # synthetic feed generator
 app.py, app_pages/, recon_app/   # Streamlit wizard over recon.pipeline
 configs/olist_benchmark.json     # benchmark run config
