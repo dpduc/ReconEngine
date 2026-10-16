@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 from recon.config import FeedSpec
-from recon.schema import INGESTED_AT, NUMERIC_COLUMNS, ROW_HASH, SOURCE_FILE, SOURCE_ROW
+from recon.schema import INGESTED_AT, ROW_HASH, SOURCE_FILE, SOURCE_ROW, numeric_columns
 
 
 # Where feed files come from: a folder, or `{relative file name: bytes}` held in memory
@@ -157,10 +157,10 @@ def parse_dates(values: pd.Series, date_format: str | None = None, utc: bool = F
     return parsed
 
 
-def parse_numeric(name: str, frame: pd.DataFrame) -> pd.DataFrame:
-    """Parse the feed's numeric columns; unparseable values become NaN (the parse check reports them first)."""
+def parse_numeric(kind: str | None, frame: pd.DataFrame) -> pd.DataFrame:
+    """Parse the numeric columns of a feed of `kind`; unparseable values become NaN (the parse check reports
+    them first)."""
     frame = frame.copy()
-    for column in NUMERIC_COLUMNS.get(name, ()):
-        if column in frame:
-            frame[column] = pd.to_numeric(frame[column], errors="coerce")
+    for column in numeric_columns(kind or "", frame.columns):
+        frame[column] = pd.to_numeric(frame[column], errors="coerce")
     return frame

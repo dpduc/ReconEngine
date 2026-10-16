@@ -12,7 +12,7 @@ import pandas as pd
 
 from recon.ingest import parse_dates
 from recon.config import RunConfig
-from recon.schema import CURRENCY, NUMERIC_COLUMNS, ORDER_STATUS
+from recon.schema import CURRENCY, ORDER_STATUS, numeric_columns
 
 Profile = Callable[[dict[str, pd.DataFrame], RunConfig], Any]
 
@@ -39,11 +39,10 @@ def _percentiles(values: pd.Series, extra: dict[str, float] | None = None) -> di
 def amount_distribution(feeds: dict[str, pd.DataFrame], config: RunConfig) -> dict[str, Any] | None:
     out = {}
     for feed, frame in feeds.items():
-        for column in NUMERIC_COLUMNS.get(feed, ()):
-            if column in frame.columns:
-                values = frame[column]
-                out[f"{feed}.{column}"] = _percentiles(values, {"mean": float(values.mean())}
-                                                       if values.notna().any() else None)
+        for column in numeric_columns(config.kind(feed) or "", frame.columns):
+            values = frame[column]
+            out[f"{feed}.{column}"] = _percentiles(values, {"mean": float(values.mean())}
+                                                   if values.notna().any() else None)
     return out or None
 
 

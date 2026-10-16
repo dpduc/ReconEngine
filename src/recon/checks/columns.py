@@ -14,8 +14,9 @@ from recon.schema import LINEAGE_COLUMNS, REQUIRED_COLUMNS
 def missing_required_column(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Issue]:
     issues = []
     for feed, frame in feeds.items():
-        unmapped = sorted(set(frame.columns) - set(REQUIRED_COLUMNS[feed]) - set(LINEAGE_COLUMNS))
-        for column in REQUIRED_COLUMNS[feed]:
+        kind = config.kind(feed)
+        unmapped = sorted(set(frame.columns) - set(REQUIRED_COLUMNS[kind]) - set(LINEAGE_COLUMNS))
+        for column in REQUIRED_COLUMNS[kind]:
             if column in frame.columns:
                 continue
             issues.append(Issue(

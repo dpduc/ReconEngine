@@ -89,6 +89,7 @@ class ReconRun:
     orphans: pd.DataFrame = field(default_factory=pd.DataFrame)  # unlinked bank/logistics records
     # rows a resolution took out of the run, with issue id and reason (EXCLUDED_COLUMNS)
     excluded: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(columns=list(EXCLUDED_COLUMNS)))
+    settlement_batches: pd.DataFrame = field(default_factory=pd.DataFrame)  # one row per payout of a report
 
     @property
     def blocked(self) -> bool:
@@ -121,6 +122,7 @@ class ReconRun:
             "close_watchlist.csv": self.close_watchlist.to_csv(index=False),
             "funnel.csv": self.funnel.to_csv(index=False),
             "excluded.csv": self.excluded.to_csv(index=False),
+            "settlement_batches.csv": self.settlement_batches.to_csv(index=False),
         }
         performance = self.manifest.get("performance")
         if performance is not None:

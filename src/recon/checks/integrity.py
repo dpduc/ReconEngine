@@ -8,7 +8,7 @@ from recon.checks import register, register_raw, sample
 from recon.config import RunConfig
 from recon.health import DUPLICATE_STRATEGY, EXCLUDE_ROWS, SET_DATE_FORMAT, FixOption, Issue, Severity
 from recon.ingest import parse_dates
-from recon.schema import DATE_COLUMNS, NUMERIC_COLUMNS, PRIMARY_KEYS, SOURCE_ROW, review_column
+from recon.schema import DATE_COLUMNS, PRIMARY_KEYS, SOURCE_ROW, numeric_columns, review_column
 
 
 def sample_rows(frame: pd.DataFrame, columns: list[str]) -> tuple[dict, ...]:
@@ -39,9 +39,7 @@ def _parse_issue(feed: str, column: str, bad: pd.DataFrame, check: str, kind: st
 def unparseable_value(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Issue]:
     issues = []
     for feed, frame in feeds.items():
-        for column in NUMERIC_COLUMNS.get(feed, ()):
-            if column not in frame:
-                continue
+        for column in numeric_columns(config.kind(feed) or "", frame.columns):
             values = frame[column]
             bad = frame[values.notna() & pd.to_numeric(values, errors="coerce").isna()]
             if len(bad):
@@ -60,7 +58,7 @@ DATE_FORMAT_CANDIDATES = tuple(
 def unparseable_date(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Issue]:
     issues = []
     for feed, frame in feeds.items():
-        for column in DATE_COLUMNS.get(feed, ()):
+        for column in DATE_COLUMNS.get(config.kind(feed), ()):
             if column not in frame:
                 continue
             values = frame[column]
@@ -80,7 +78,7 @@ def unparseable_date(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[
 def duplicate_key(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Issue]:
     issues = []
     for feed, frame in feeds.items():
-        key = PRIMARY_KEYS.get(feed)
+        key = PRIMARY_KEYS.get(config.kind(feed))
         if key not in frame.columns:
             continue
         open_rows = frame[frame[review_column(feed)].isna()] if review_column(feed) in frame else frame

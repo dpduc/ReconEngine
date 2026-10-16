@@ -25,7 +25,68 @@ def _fee_rate(row: Row) -> str:
     return "the contract MDR" if bps is None else f"the contract fee ({bps / 100:.2f}%)"
 
 
+def _report(row: Row) -> str:
+    return f"the {_value(row, 'settlement_feed')} settlement report"
+
+
+def _line_amount(row: Row) -> str:
+    refund = _value(row, "settlement_refund") or 0
+    if refund:
+        return (f"The line in {_report(row)} refunds {refund:,.2f} to the buyer, but the order is still at its "
+                "full amount.")
+    return _difference("The settlement line's gross", _value(row, "settlement_gross_delta"),
+                       "the order's item total")
+
+
+def _line_fees(row: Row) -> str:
+    bps = _value(row, "settlement_fee_bps")
+    terms = "the channel's terms" if bps is None else f"the channel's terms ({bps / 100:.2f}% of gross)"
+    return _difference("The fee total on the settlement line", _value(row, "settlement_fee_delta"), terms)
+
+
+def _remitted(row: Row) -> bool:
+    return _value(row, "batch_kind") == "remittance"
+
+
+def _batch(row: Row) -> str:
+    """'payout <id>' or 'remittance <id>': the settlement batch that pays the order."""
+    return f"{_value(row, 'batch_kind') or 'payout'} {_value(row, 'batch_id') or _value(row, 'settlement_payout_id')}"
+
+
+def _missing_remittance(row: Row) -> str:
+    shipment = _value(row, "tracking_code")
+    if shipment is None:
+        return "No shipment found for this order, so no carrier remittance pays it."
+    if _value(row, "shipment_returned"):
+        return (f"Shipment {shipment} was returned to the seller: the carrier collected no COD, "
+                "and the return is not recorded in the OMS.")
+    if _value(row, "batch_id") is None:
+        return f"The carrier has not put shipment {shipment} on a remittance yet."
+    return f"Remittance {_value(row, 'batch_id')} pays shipment {shipment}, but no bank credit names it."
+
+
+def _missing_payment(row: Row) -> str:
+    if _remitted(row):
+        return _missing_remittance(row)
+    if not _value(row, "settlement_feed"):
+        return "No bank credit found for this order."
+    payout = _value(row, "settlement_payout_id")
+    if payout is None:
+        return f"No line for this order in {_report(row)}."
+    return f"Payout {payout} in {_report(row)} pays this order, but no bank credit names it."
+
+
+def _batch_mismatch(row: Row) -> str:
+    return (_difference(f"The bank credit for {_batch(row)}", _value(row, "batch_tie_out_delta"),
+                        "the net of its lines").rstrip(".")
+            + "; every order in the batch is reviewed.")
+
+
 def _amount_mismatch(row: Row) -> str:
+    if _remitted(row):
+        return _difference("The COD collected", _value(row, "cod_amount_delta"), "the order amount")
+    if _value(row, "settlement_feed"):
+        return _line_amount(row)
     sentence = _difference("The bank credit", _value(row, "credit_delta"), "expected")
     cod_delta = _value(row, "cod_amount_delta")
     if row.get("payment_method") == "COD" and cod_delta:
@@ -99,14 +160,24 @@ SENTENCES: dict[str, Callable[[Row], str]] = {
         "The order has no amount, so there is nothing to compare the money against."),
     "ORDER_STATUS_REQUIRES_POLICY": lambda row: (
         f"Order status {_status(row)} has no evidence policy yet; a business decision is needed."),
-    "MISSING_PAYMENT": lambda row: "No bank credit found for this order.",
+    "MISSING_PAYMENT": _missing_payment,
+    "SETTLEMENT_TIE_OUT": lambda row: (
+        f"The order ties out against its line in {_report(row)}, and payout "
+        f"{_value(row, 'settlement_payout_id')} ties out against its bank credit."),
+    "REMITTANCE_TIE_OUT": lambda row: (
+        f"Shipment {_value(row, 'tracking_code')} collected the order amount, and remittance "
+        f"{_value(row, 'batch_id')} ties out against its bank credit."),
+    "SETTLEMENT_BATCH_MISMATCH": _batch_mismatch,
+    "PAYOUT_CREDIT_AMBIGUOUS": lambda row: (
+        f"Several bank credits name {_batch(row)}; a reviewer picks the one that pays it."),
     "CURRENCY_MISMATCH": _currency_mismatch,
     "INSTALLMENT_INTEREST": _installment_interest,
     "POSSIBLE_INSTALLMENT_INTEREST": _possible_interest,
     "FX_DIFFERENCE": _fx_difference,
     "AMOUNT_MISMATCH": _amount_mismatch,
     "MISSING_SHIPMENT": lambda row: "No shipment found for this order.",
-    "FEE_MISMATCH": lambda row: _difference("The bank fee", _value(row, "fee_delta"), _fee_rate(row)),
+    "FEE_MISMATCH": lambda row: (_line_fees(row) if _value(row, "settlement_feed")
+                                 else _difference("The bank fee", _value(row, "fee_delta"), _fee_rate(row))),
     "COD_FEE_MISMATCH": lambda row: _difference("The COD fee", _value(row, "cod_fee_delta"), "the contract fee"),
     "TIMING_MISMATCH": lambda row: "The shipment was picked up after it was delivered.",
     "LINK_CANDIDATES": _candidates,
@@ -128,7 +199,9 @@ def _sentence(code: str, row: Row) -> str:
 COLUMNS = ("reason_codes", "confidence", "payment_method", "order_status", "credit_delta", "cod_amount_delta",
            "fee_delta", "fee_bps", "cod_fee_delta", "link_candidates", "currency_oms", "currency_bank",
            "expected_credit", "fx_rate", "fx_rate_source", "fx_rate_date", "fx_converted", "fx_rate_missing",
-           "installments", "installments_bank")
+           "installments", "installments_bank", "settlement_feed", "settlement_payout_id", "settlement_refund",
+           "settlement_gross_delta", "settlement_fee_delta", "settlement_fee_bps", "batch_tie_out_delta",
+           "batch_kind", "batch_id", "tracking_code", "shipment_returned")
 
 
 def explain_all(frame: pd.DataFrame) -> list[str]:

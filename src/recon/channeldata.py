@@ -42,7 +42,7 @@ import pandas as pd
 
 from recon.contracts import fee as vnd_fee
 
-GENERATOR_VERSION = "2.3.0"
+GENERATOR_VERSION = "2.5.0"
 SOURCE_FILES = ("olist_orders_dataset.csv", "olist_order_items_dataset.csv", "olist_order_payments_dataset.csv")
 DATE_SHIFT = pd.Timedelta(days=2926)  # 418 weeks: weekdays kept, Black Friday 2017 -> Black Friday 2025
 DATE_COLUMNS = ("order_purchase_timestamp", "order_approved_at", "order_delivered_carrier_date",
@@ -852,6 +852,17 @@ class Market:
     profiles: tuple[Profile, ...]
     policy: dict[str, Any]  # engine policy of the set's config
     simulated: dict[str, str]
+    # marketplace -> its settlement report feed in the set's config: file, date format, column mapping
+    # and the channel's terms (fee_bps, amount_tolerance)
+    reports: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # channels whose COD comes back in carrier remittances that the bank credit names
+    cod_remittances: tuple[str, ...] = ()
+
+
+TIKTOK_REPORT = {"path": "tiktok_settlement.csv", "date_format": "%Y/%m/%d %H:%M:%S",
+                 "mapping": {"order_no": "Order ID", "payout_id": "Statement ID", "gross": "Total revenue",
+                             "fee_commission": "Platform commission", "fee_transaction": "Transaction fee",
+                             "refund": "Refund", "net": "Total settlement amount", "settled_at": "Order settled time"}}
 
 
 MARKETS = {
@@ -866,12 +877,35 @@ MARKETS = {
                   "times": "times after purchase compressed by time_scale, so deliveries take a few days",
                   "order_id": "seller order codes ORDyyyy-nnnnnnn; ground_truth.source_order_id is the Olist id",
                   "customer_name": "synthetic Vietnamese names (Olist has none); bank lines print them without "
-                                   "diacritics"}),
+                                   "diacritics"},
+                 {"shopee": {"path": "shopee_settlement.csv", "date_format": "%d/%m/%Y",
+                             "mapping": {"order_no": "Mã đơn hàng", "payout_id": "Mã thanh toán",
+                                         "gross": "Giá sản phẩm", "fee_fixed": "Phí cố định",
+                                         "fee_payment": "Phí thanh toán", "refund": "Hoàn tiền",
+                                         "net": "Tổng tiền đã thanh toán", "settled_at": "Ngày hoàn thành thanh toán"},
+                             # reports are exact to the dong: the tolerance is rounding, not a customer's typo
+                             "terms": {"fee_bps": round((VietnamAssumptions.shopee_fixed_rate
+                                                         + VietnamAssumptions.shopee_payment_rate) * 10_000),
+                                       "amount_tolerance": 1}},
+                  "tiktok": {**TIKTOK_REPORT,
+                             "terms": {"fee_bps": round((VietnamAssumptions.tiktok_commission
+                                                         + VietnamAssumptions.tiktok_transaction_fee) * 10_000),
+                                       "amount_tolerance": 1}}},
+                 cod_remittances=("website", "facebook")),
     "br": Market("br", "BRL", _BrazilSeller, BrazilAssumptions(), BR_PROFILES,
                  {"mdr_bps": round(BrazilAssumptions.card_mdr * 10_000),
                   "cod_fee_bps": round(BrazilAssumptions.courier_cod_fee * 10_000), "amount_tolerance": 0.01,
                   "payer_pattern": r"^PIX RECEBIDO - (?P<payer>.+)$"},
-                 {"customer_name": "synthetic names (Olist has none)"}),
+                 {"customer_name": "synthetic names (Olist has none)"},
+                 {"shopee": {"path": "shopee_settlement.csv", "date_format": "%d/%m/%Y",
+                             "mapping": {"order_no": "ID do pedido", "payout_id": "ID do repasse",
+                                         "gross": "Preço original do produto", "fee_commission": "Taxa de comissão",
+                                         "fee_service": "Taxa de serviço", "refund": "Reembolso",
+                                         "net": "Valor liberado", "settled_at": "Data de conclusão do pagamento"},
+                             "terms": {}},  # a fixed fee per order on top of the commission: not a rate
+                  "tiktok": {**TIKTOK_REPORT,
+                             "terms": {"fee_bps": round((BrazilAssumptions.tiktok_commission
+                                                         + BrazilAssumptions.tiktok_transaction_fee) * 10_000)}}}),
 }
 
 
@@ -955,17 +989,26 @@ def build_set(olist: pd.DataFrame, market: Market, profile: Profile,
 
 def config_for(market: Market) -> dict[str, Any]:
     """A runnable engine config for one set. No resolutions: the analyst works through Health."""
+    feeds = {name: {"path": f"{file}.csv", "format": "csv", "encoding": "utf-8", "date_format": None}
+             for name, file in (("oms", "oms_orders"), ("bank", "bank_statement"), ("logistics", "logistics_report"))}
+    for name, report in market.reports.items():
+        feeds[name] = {"path": report["path"], "format": "csv", "encoding": "utf-8",
+                       "date_format": report["date_format"], "role": "settlement"}
+    channels = {name: {"chain": "marketplace", "settlement": name, **market.reports[name]["terms"]}
+                if name in market.reports else {} for name in CHANNELS}
+    for name in market.cod_remittances:
+        channels[name]["cod_remittances"] = True
     return {
-        "feeds": {name: {"path": f"{file}.csv", "format": "csv", "encoding": "utf-8", "date_format": None}
-                  for name, file in (("oms", "oms_orders"), ("bank", "bank_statement"),
-                                     ("logistics", "logistics_report"))},
+        "feeds": feeds,
+        "channels": channels,
         "mapping": {
             "oms": {c: c for c in ("order_id", "tracking_no", "payment_method", "order_amount", "ordered_at",
-                                   "customer_name")},
+                                   "customer_name", "channel", "channel_order_no", "item_total")},
             "bank": {c: c for c in ("txn_ref", "description", "credit_amount", "fee_amount", "net_amount",
                                     "value_date")},
             "logistics": {c: c for c in ("tracking_code", "client_order_code", "cod_collected", "ship_fee",
-                                         "cod_fee")},
+                                         "cod_fee", "remittance_id", "status")},
+            **{name: report["mapping"] for name, report in market.reports.items()},
         },
         "policy": {**market.policy,
                    "status_policy": {"delivered": ["payment", "shipment"], "shipped": ["payment", "shipment"]}},

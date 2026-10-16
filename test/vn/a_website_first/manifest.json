@@ -1,6 +1,6 @@
 {
   "generator": "recon.channeldata",
-  "generator_version": "2.3.0",
+  "generator_version": "2.5.0",
   "market": "vn",
   "source": "brazil ecom",
   "source_files": [
@@ -156,25 +156,26 @@
   },
   "baseline": {
     "status": "COMPLETED",
-    "warnings_acknowledged": 9,
+    "warnings_acknowledged": 11,
     "decisions": {
-      "EXCEPTION": 403,
-      "AUTO_ACCEPT": 199,
-      "REVIEW": 4
+      "AUTO_ACCEPT": 566,
+      "EXCEPTION": 40
     },
-    "accuracy": 0.3927392739273927,
+    "accuracy": 0.9983498349834984,
     "auto_accept_precision": 1.0,
-    "orphans": 172,
+    "orphans": 105,
     "links": {
-      "precision": 0.9984544049459042,
-      "recall": 0.5260586319218241,
+      "precision": 1.0,
+      "recall": 0.9985486211901307,
       "recall_per_link_kind": {
-        "bank:cod_remittance": 0.0,
-        "bank:name_amount": 0.9523809523809523,
+        "bank:cod_remittance": 1.0,
+        "bank:name_amount": 1.0,
         "bank:order_ref": 1.0,
-        "bank:payout_batch": 0.0,
+        "bank:payout_batch": 1.0,
         "bank:split": 0.0,
-        "logistics:order_ref": 1.0
+        "logistics:order_ref": 1.0,
+        "shopee:order_no": 1.0,
+        "tiktok:order_no": 1.0
       }
     }
   }

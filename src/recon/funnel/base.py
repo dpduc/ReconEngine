@@ -12,15 +12,15 @@ from typing import Callable
 
 import pandas as pd
 
-from recon.config import Policy
+from recon.config import Channel, Policy
 from recon.funnel.explain import explain_all
 from recon.ingest import parse_dates
 from recon.schema import INGESTED_AT, LINEAGE_COLUMNS
 from recon.timing import StageTimer
 
-RULE_VERSION = "1.6.0"  # bump whenever funnel logic changes
+RULE_VERSION = "1.8.0"  # bump whenever funnel logic changes
 
-HASH_COLUMNS = ("oms_row_hash", "bank_row_hash", "logistics_row_hash")
+HASH_COLUMNS = ("oms_row_hash", "bank_row_hash", "logistics_row_hash", "settlement_row_hash")
 
 
 @dataclass(frozen=True)
@@ -29,6 +29,12 @@ class FunnelContext:
     policy: Policy  # with the run config's resolutions applied
     date_formats: dict[str, str | None] = field(default_factory=dict)  # feed -> declared strftime format
     fx_rates: pd.DataFrame | None = None  # the policy's rate table, read (see funnel.fx)
+    order_ref_patterns: tuple[str, ...] = ()  # the chains' own order-reference patterns (see linking)
+    marketplaces: dict[str, Channel] = field(default_factory=dict)  # OMS channel value -> marketplace channel
+    cod_channels: tuple[str, ...] = ()  # OMS channel values whose COD orders are paid by carrier remittances
+    # Settlement batch results: payouts (funnel.settlement) and remittances (funnel.remittance).
+    batches: pd.DataFrame | None = None
+    payout_credit_rows: frozenset[int] = frozenset()  # bank source rows naming a batch: not free to link
 
     def dates(self, feed: str, values: pd.Series, utc: bool = False) -> pd.Series:
         """`values` (a date column of `feed`) parsed as the feed declares."""

@@ -21,7 +21,7 @@ def attach_truth(results: pd.DataFrame, truth: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-CLEAN_CODES = {"THREE_WAY_TIE_OUT"}  # reason codes that describe a match, not a problem
+CLEAN_CODES = {"THREE_WAY_TIE_OUT", "SETTLEMENT_TIE_OUT", "REMITTANCE_TIE_OUT"}  # reason codes that describe a match, not a problem
 
 
 def _codes(value: Any) -> set[str]:
@@ -82,11 +82,19 @@ def read_link_truth(truth: pd.DataFrame) -> pd.DataFrame:
 
 def _predicted_links(results: pd.DataFrame) -> pd.DataFrame:
     frames = []
+    if "settlement_order_no" in results:  # a unit's line in its channel's settlement report
+        linked = results[results["settlement_order_no"].notna()]
+        frames.append(pd.DataFrame({"feed": linked["settlement_feed"], "record_key": linked["settlement_order_no"]
+                                    .astype(str), "order_id": linked["order_id"].astype(str), "link_pass": "exact"}))
     for feed, (key, link_pass) in LINKED_FEEDS.items():
         if key in results and link_pass in results:
             linked = results[results[key].notna()]
             frames.append(pd.DataFrame({"feed": feed, "record_key": linked[key].astype(str),
                                         "order_id": linked["order_id"].astype(str), "link_pass": linked[link_pass]}))
+    if "remittance_txn_ref" in results:  # the remittance a unit's shipment is on, when not its own credit
+        linked = results[results["remittance_txn_ref"].notna() & results["remittance_txn_ref"].ne(results["txn_ref"])]
+        frames.append(pd.DataFrame({"feed": "bank", "record_key": linked["remittance_txn_ref"].astype(str),
+                                    "order_id": linked["order_id"].astype(str), "link_pass": "remittance"}))
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["feed", "record_key", "order_id",
                                                                                       "link_pass"])
 
@@ -105,17 +113,19 @@ def _candidate_metrics(results: pd.DataFrame, true_bank: set[tuple[str, str]]) -
             "any_correct": _ratio(any_, len(proposed))}
 
 
-def link_metrics(results: pd.DataFrame, truth: pd.DataFrame) -> dict[str, Any]:
+def link_metrics(results: pd.DataFrame, truth: pd.DataFrame,
+                 settlement_feeds: tuple[str, ...] = ()) -> dict[str, Any]:
     """Precision and recall of the links a run made, against true links.
 
-    Only true links of orders in this run and of feeds the engine links (bank, logistics) can be
-    found; the others are counted under `not_scored` (e.g. a settlement report the run did not read,
-    or an order from an earlier period). Precision is per linking pass, recall per feed and per
+    Only true links of orders in this run and of feeds the engine links (bank, logistics and the
+    marketplaces' `settlement_feeds`) can be found; the others are counted under `not_scored` (e.g.
+    a settlement report the run did not read, or an order from an earlier period). Precision is per linking pass, recall per feed and per
     true link kind (e.g. `order_ref`, `payout_batch`).
     """
     truth = read_link_truth(truth)
     in_run = truth["order_id"].isin(results["order_id"].astype(str).unique().tolist())
-    linkable = truth["feed"].isin(list(LINKED_FEEDS))
+    feeds = [*LINKED_FEEDS, *dict.fromkeys(settlement_feeds)]
+    linkable = truth["feed"].isin(feeds)
     scored_truth = truth[linkable & in_run]
     keys = list(LINK_TRUTH_COLUMNS)
     predicted = _predicted_links(results)
@@ -141,7 +151,7 @@ def link_metrics(results: pd.DataFrame, truth: pd.DataFrame) -> dict[str, Any]:
         "per_pass": {f"{feed}:{link_pass}": precision(group)
                      for (feed, link_pass), group in predicted.groupby(["feed", "link_pass"], sort=True)},
         "per_feed": {feed: {**precision(predicted[predicted["feed"] == feed]),
-                            **recall(scored_truth[scored_truth["feed"] == feed])} for feed in LINKED_FEEDS},
+                            **recall(scored_truth[scored_truth["feed"] == feed])} for feed in feeds},
         "per_link_kind": {f"{feed}:{kind}": recall(group)
                           for (feed, kind), group in scored_truth.groupby(["feed", "link_kind"], sort=True)},
         CANDIDATES: _candidate_metrics(results, true_bank),

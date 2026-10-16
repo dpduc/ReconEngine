@@ -38,7 +38,7 @@ def currency_mismatch(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list
         return []
     order_currency = (oms.dropna(subset=[order_id]).drop_duplicates(order_id, keep=False)
                       .set_index(order_id)[CURRENCY].pipe(currency_codes))
-    expected = bank_order_refs(bank).map(order_currency)
+    expected = bank_order_refs(bank, config.order_ref_patterns).map(order_currency)
     actual = currency_codes(bank[CURRENCY])
     routed = (bank[review_column("bank")].notna() if review_column("bank") in bank
               else pd.Series(False, index=bank.index))  # already routed to review: handled

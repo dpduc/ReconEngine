@@ -222,6 +222,15 @@ def _payment_type_without_fee_rate(issue: Issue) -> Guidance:
             "the policy's payment_type_fee_bps and inspect again.")
 
 
+def _channel_not_configured(issue: Issue) -> Guidance:
+    return Guidance(
+        meaning=f"{issue.affected_rows:,} orders belong to a sales channel the config does not declare.",
+        next_step="They are reconciled on the default prepaid chain: the bank credit names the order.",
+        needs_decision=False, recommended=_option(issue, ACKNOWLEDGE),
+        why="Acknowledge if this channel's buyers pay the seller directly; otherwise declare the channel and its "
+            "money chain in the config's channels and inspect again.")
+
+
 GUIDES: dict[str, Callable[[Issue], Guidance]] = {
     "missing_required_column": _missing_column,
     "unparseable_value": _unparseable_value,
@@ -236,6 +245,7 @@ GUIDES: dict[str, Callable[[Issue], Guidance]] = {
     "status_not_in_policy": _status_not_in_policy,
     "currency_mismatch": _currency_mismatch,
     "payment_type_without_fee_rate": _payment_type_without_fee_rate,
+    "channel_not_configured": _channel_not_configured,
 }
 
 

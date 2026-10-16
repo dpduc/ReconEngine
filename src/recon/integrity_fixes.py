@@ -48,7 +48,7 @@ def exclude_rows(feeds: Feeds, resolution: Resolution, config: RunConfig) -> Fee
 
 def _latest_order(frame: pd.DataFrame, feed: str, config: RunConfig) -> pd.Series:
     """Sort key: the feed's own date when present, then file order."""
-    for column in DATE_COLUMNS.get(feed, ()):
+    for column in DATE_COLUMNS.get(config.kind(feed), ()):
         if column in frame:
             return parse_dates(frame[column], config.date_format(feed))
     return frame[SOURCE_ROW]
@@ -57,7 +57,7 @@ def _latest_order(frame: pd.DataFrame, feed: str, config: RunConfig) -> pd.Serie
 def duplicate_strategy(feeds: Feeds, resolution: Resolution, config: RunConfig) -> Feeds:
     """params: feed, strategy in keep_first | keep_latest | review."""
     feed, strategy = resolution.params["feed"], resolution.params["strategy"]
-    frame, key = feeds[feed], PRIMARY_KEYS[feed]
+    frame, key = feeds[feed], PRIMARY_KEYS[config.kind(feed)]
     live = frame[EXCLUDED_BY].isna() if EXCLUDED_BY in frame else pd.Series(True, index=frame.index)
     dupes = live & frame[key].notna() & frame[key].where(live).duplicated(keep=False)
     if strategy == "review":
@@ -83,7 +83,7 @@ def set_date_format(feeds: Feeds, resolution: Resolution, config: RunConfig) -> 
     feed, date_format = resolution.params["feed"], resolution.params["date_format"]
     iso = "%Y-%m-%dT%H:%M:%S" if "%H" in date_format else "%Y-%m-%d"
     frame = feeds[feed].copy()
-    for column in DATE_COLUMNS.get(feed, ()):
+    for column in DATE_COLUMNS.get(config.kind(feed), ()):
         if column in frame:
             parsed = parse_dates(frame[column], date_format)
             frame[column] = parsed.dt.strftime(iso).where(parsed.notna(), frame[column])

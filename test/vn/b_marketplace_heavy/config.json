@@ -17,6 +17,40 @@
       "format": "csv",
       "encoding": "utf-8",
       "date_format": null
+    },
+    "shopee": {
+      "path": "shopee_settlement.csv",
+      "format": "csv",
+      "encoding": "utf-8",
+      "date_format": "%d/%m/%Y",
+      "role": "settlement"
+    },
+    "tiktok": {
+      "path": "tiktok_settlement.csv",
+      "format": "csv",
+      "encoding": "utf-8",
+      "date_format": "%Y/%m/%d %H:%M:%S",
+      "role": "settlement"
+    }
+  },
+  "channels": {
+    "website": {
+      "cod_remittances": true
+    },
+    "shopee": {
+      "chain": "marketplace",
+      "settlement": "shopee",
+      "fee_bps": 1300,
+      "amount_tolerance": 1
+    },
+    "tiktok": {
+      "chain": "marketplace",
+      "settlement": "tiktok",
+      "fee_bps": 1000,
+      "amount_tolerance": 1
+    },
+    "facebook": {
+      "cod_remittances": true
     }
   },
   "mapping": {
@@ -26,7 +60,10 @@
       "payment_method": "payment_method",
       "order_amount": "order_amount",
       "ordered_at": "ordered_at",
-      "customer_name": "customer_name"
+      "customer_name": "customer_name",
+      "channel": "channel",
+      "channel_order_no": "channel_order_no",
+      "item_total": "item_total"
     },
     "bank": {
       "txn_ref": "txn_ref",
@@ -41,7 +78,29 @@
       "client_order_code": "client_order_code",
       "cod_collected": "cod_collected",
       "ship_fee": "ship_fee",
-      "cod_fee": "cod_fee"
+      "cod_fee": "cod_fee",
+      "remittance_id": "remittance_id",
+      "status": "status"
+    },
+    "shopee": {
+      "order_no": "M\u00e3 \u0111\u01a1n h\u00e0ng",
+      "payout_id": "M\u00e3 thanh to\u00e1n",
+      "gross": "Gi\u00e1 s\u1ea3n ph\u1ea9m",
+      "fee_fixed": "Ph\u00ed c\u1ed1 \u0111\u1ecbnh",
+      "fee_payment": "Ph\u00ed thanh to\u00e1n",
+      "refund": "Ho\u00e0n ti\u1ec1n",
+      "net": "T\u1ed5ng ti\u1ec1n \u0111\u00e3 thanh to\u00e1n",
+      "settled_at": "Ng\u00e0y ho\u00e0n th\u00e0nh thanh to\u00e1n"
+    },
+    "tiktok": {
+      "order_no": "Order ID",
+      "payout_id": "Statement ID",
+      "gross": "Total revenue",
+      "fee_commission": "Platform commission",
+      "fee_transaction": "Transaction fee",
+      "refund": "Refund",
+      "net": "Total settlement amount",
+      "settled_at": "Order settled time"
     }
   },
   "policy": {
