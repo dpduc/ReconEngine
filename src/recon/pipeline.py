@@ -6,7 +6,9 @@ Everything a shell needs (config types, fix-option ids, schema names) is re-expo
 from __future__ import annotations
 
 import io
+from collections.abc import Mapping
 from dataclasses import dataclass, replace
+from pathlib import Path
 from datetime import datetime, timezone
 
 import pandas as pd
@@ -173,13 +175,39 @@ def inspect(sources: Sources, config: RunConfig) -> HealthReport:
     return _prepare(sources, config).report
 
 
-def run(sources: Sources, config: RunConfig) -> ReconRun:
-    """Re-inspect; refuse with a blocked run while the gate is closed, else run the funnel."""
+# A labels folder's files: the expected outcome per order, and the true links.
+LABEL_FILES = {"ground_truth": "ground_truth.csv", "link_truth": "links.csv"}
+
+
+def _label_files(sources: Sources, config: RunConfig, labels: Sources | None) -> tuple[Sources, dict[str, str]]:
+    """Where a run's labels come from, and `{kind: path}` there.
+
+    With `labels`, its own `ground_truth.csv` and `links.csv`; without, the files the config names
+    in `sources` (labels kept with the inputs, as the Olist benchmark does).
+    """
+    if labels is None:
+        named = {"ground_truth": config.ground_truth, "link_truth": config.link_truth}
+        return sources, {kind: path for kind, path in named.items() if path}
+    present = (lambda name: name in labels) if isinstance(labels, Mapping) else         (lambda name: (Path(labels) / name).is_file())
+    found = {kind: name for kind, name in LABEL_FILES.items() if present(name)}
+    if not found:
+        raise FileNotFoundError(f"no labels in {labels}: expected {' or '.join(LABEL_FILES.values())}")
+    return labels, found
+
+
+def run(sources: Sources, config: RunConfig, labels: Sources | None = None) -> ReconRun:
+    """Re-inspect; refuse with a blocked run while the gate is closed, else run the funnel.
+
+    `labels` is a folder (or in-memory files) holding `ground_truth.csv` and/or `links.csv`; with it
+    the run is scored. Without it, only labels the config names in `sources` are read.
+    """
+    label_source, label_files = _label_files(sources, config, labels)
     with RunMeter() as meter:
-        return _run(sources, config, meter)
+        return _run(sources, config, meter, label_source, label_files)
 
 
-def _run(sources: Sources, config: RunConfig, meter: RunMeter) -> ReconRun:
+def _run(sources: Sources, config: RunConfig, meter: RunMeter, label_source: Sources,
+         label_files: dict[str, str]) -> ReconRun:
     timer = meter.timer
     prepared = _prepare(sources, config, timer)
     input_bytes = int(sum(loaded.size_bytes for loaded in prepared.inputs.values()))
@@ -219,18 +247,18 @@ def _run(sources: Sources, config: RunConfig, meter: RunMeter) -> ReconRun:
         input_files["fx_rates"] = {"path": policy.fx.rate_table, "sha256": sha256(rate_table)}
     if carried is not None:
         input_files["open_items"] = {"path": config.open_items, "sha256": sha256(carried)}
-    if config.ground_truth:
+    if "ground_truth" in label_files:
         with timer.stage("ground_truth"):
-            truth = read_source(sources, config.ground_truth)
+            truth = read_source(label_source, label_files["ground_truth"])
             results = attach_truth(results, pd.read_csv(io.BytesIO(truth)))
-        input_files["ground_truth"] = {"path": config.ground_truth, "sha256": sha256(truth)}
+        input_files["ground_truth"] = {"path": label_files["ground_truth"], "sha256": sha256(truth)}
     links = None
-    if config.link_truth:
+    if "link_truth" in label_files:
         with timer.stage("link_truth"):
-            link_truth = read_source(sources, config.link_truth)
+            link_truth = read_source(label_source, label_files["link_truth"])
             links = link_metrics(results, pd.read_csv(io.BytesIO(link_truth), dtype=str, keep_default_na=False),
                                  settlement_feeds=config.settlement_feeds)
-        input_files["link_truth"] = {"path": config.link_truth, "sha256": sha256(link_truth)}
+        input_files["link_truth"] = {"path": label_files["link_truth"], "sha256": sha256(link_truth)}
     manifest = {
         "rule_version": RULE_VERSION,
         "created_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),

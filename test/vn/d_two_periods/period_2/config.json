@@ -151,7 +151,5 @@
     "grace_days": 3
   },
   "resolutions": [],
-  "ground_truth": "ground_truth.csv",
-  "link_truth": "links.csv",
   "open_items": "open_items.csv"
 }

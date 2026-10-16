@@ -1,5 +1,7 @@
 """Load: pick one export per feed, review the suggested mapping, confirm or override it.
 
+A local folder with its own config.json can be loaded by that config as it is.
+
 Uploads stay in memory; a local folder is read in place. Neither writes copies to disk.
 """
 
@@ -9,12 +11,13 @@ from pathlib import Path
 
 import streamlit as st
 
-from recon.pipeline import FEED_LABELS, FILE_EXTENSIONS, MappingProfile
+from recon.pipeline import FEED_LABELS, FILE_EXTENSIONS, MappingProfile, load_config
 from recon_app import state
 
 TYPES = [extension.lstrip(".") for extension in FILE_EXTENSIONS]
 UNMAPPED = "(not mapped)"
 UPLOAD, FOLDER = "Upload files", "Local folder"
+CONFIG = "config.json"
 
 
 def pick_uploads() -> tuple[dict[str, bytes], dict[str, str]] | None:
@@ -24,6 +27,21 @@ def pick_uploads() -> tuple[dict[str, bytes], dict[str, str]] | None:
     if not all(uploads.values()):
         return None
     return state.upload_sources(uploads)
+
+
+def use_folder_config(path: Path) -> None:
+    """Load `path` by its own config.json: feeds, mapping, channels and policy as they are."""
+    try:
+        config = load_config(path / CONFIG)
+    except (ValueError, KeyError, TypeError) as error:
+        st.error(f"{CONFIG} can't be read: {error}")
+        return
+    st.markdown("Feeds: " + ", ".join(f"**{name}** `{spec.path}`" for name, spec in config.feeds.items()))
+    if st.button(f"Use {CONFIG}", key="use_folder_config", type="primary", icon=":material/check:"):
+        state.set_inputs(str(path), config)
+    if state.inputs() == (str(path), config):
+        st.success(f"Loaded by its {CONFIG}. Inspect the feeds next.")
+        st.page_link("app_pages/health.py", label="Check health", icon=":material/arrow_forward:")
 
 
 def pick_folder() -> tuple[str, dict[str, str]] | None:
@@ -36,6 +54,10 @@ def pick_folder() -> tuple[str, dict[str, str]] | None:
     if not path.is_dir():
         st.error(f"Not a folder: {folder}")
         return None
+    if (path / CONFIG).is_file() and st.toggle(f"Use the folder's {CONFIG}", value=True, key="folder_config",
+                                                help="Off: pick the files and confirm a mapping instead."):
+        use_folder_config(path)
+        st.stop()
     names = sorted(p.name for p in path.iterdir() if p.is_file() and p.suffix.lower() in FILE_EXTENSIONS)
     if not names:
         st.warning(f"No {', '.join(TYPES)} files in {folder}.")

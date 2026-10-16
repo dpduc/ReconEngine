@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from recon.acknowledgement import acknowledge_warnings
+from recon.channeldata import labels_for
 from recon.config import Channel, FeedSpec, Policy, RunConfig
 from recon.evaluation import link_metrics
 from recon.pipeline import inspect, load_config, run
@@ -160,7 +161,7 @@ def test_a_channels_cod_remittances_survive_the_config_round_trip():
 def test_the_social_set_auto_accepts_every_cod_order_on_a_correct_remittance():
     folder = ROOT / "test" / "vn" / "c_social_heavy"
     config = load_config(folder / "config.json")
-    outcome = run(folder, acknowledge_warnings(config, inspect(folder, config), "test"))
+    outcome = run(folder, acknowledge_warnings(config, inspect(folder, config), "test"), labels=labels_for(folder))
     cod = outcome.results[outcome.results["payment_method"].eq("COD")]
     codes = cod.groupby("scenario")["reason_codes"].agg(set).to_dict()
 

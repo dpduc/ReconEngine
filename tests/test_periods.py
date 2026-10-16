@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from recon.acknowledgement import acknowledge_warnings
+from recon.channeldata import labels_for
 from recon.config import Channel, FeedSpec, Period, Policy, RunConfig
 from recon.evaluation import attach_truth, metrics
 from recon.pipeline import inspect, load_config, run
@@ -150,7 +151,7 @@ def test_the_chained_set_carries_period_one_open_items_into_period_two():
     for period in ("period_1", "period_2"):
         folder = ROOT / "test" / "vn" / "d_two_periods" / period
         config = load_config(folder / "config.json")
-        runs.append(run(folder, acknowledge_warnings(config, inspect(folder, config), "test")))
+        runs.append(run(folder, acknowledge_warnings(config, inspect(folder, config), "test"), labels=labels_for(folder)))
     first, second = runs
     carried = pd.read_csv(io.StringIO(first.bundle()["open_items.csv"]))["order_id"]
 

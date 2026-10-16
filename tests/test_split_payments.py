@@ -5,6 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from recon.acknowledgement import acknowledge_warnings
+from recon.channeldata import labels_for
 from recon.config import FeedSpec, Policy, RunConfig
 from recon.evaluation import link_metrics
 from recon.pipeline import inspect, load_config, run
@@ -103,7 +104,7 @@ def test_link_metrics_score_each_credit_of_a_split(tmp_path):
 def test_the_social_set_auto_accepts_every_split_payment():
     folder = ROOT / "test" / "vn" / "c_social_heavy"
     config = load_config(folder / "config.json")
-    outcome = run(folder, acknowledge_warnings(config, inspect(folder, config), "test"))
+    outcome = run(folder, acknowledge_warnings(config, inspect(folder, config), "test"), labels=labels_for(folder))
     codes = outcome.results.groupby("scenario")["reason_codes"].agg(set).to_dict()
 
     assert codes["SPLIT_PAYMENT"] == {"THREE_WAY_TIE_OUT"}

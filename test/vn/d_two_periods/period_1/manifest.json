@@ -149,14 +149,19 @@
     "tiktok_settlement.csv": {
       "rows": 37,
       "sha256": "71632ff7fb1e218a248db83cd29fbd47210d470c2f217cdfae073c3a07444f29"
-    },
-    "ground_truth.csv": {
-      "rows": 414,
-      "sha256": "d0b9ae9b28f20fcbd3f2585fed7cc88198970852f1ffe6229712664109d77cf2"
-    },
-    "links.csv": {
-      "rows": 982,
-      "sha256": "d56bb72061ee2ccb866cf991659ac4829116556e1f60bcc38159b9e92f21bb67"
+    }
+  },
+  "labels": {
+    "folder": "../../labels/d_two_periods/period_1",
+    "files": {
+      "ground_truth.csv": {
+        "rows": 414,
+        "sha256": "d0b9ae9b28f20fcbd3f2585fed7cc88198970852f1ffe6229712664109d77cf2"
+      },
+      "links.csv": {
+        "rows": 982,
+        "sha256": "d56bb72061ee2ccb866cf991659ac4829116556e1f60bcc38159b9e92f21bb67"
+      }
     }
   },
   "baseline": {
