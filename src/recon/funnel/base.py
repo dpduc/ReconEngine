@@ -12,13 +12,13 @@ from typing import Callable
 
 import pandas as pd
 
-from recon.config import Channel, Policy
+from recon.config import Channel, Period, Policy
 from recon.funnel.explain import explain_all
 from recon.ingest import parse_dates
-from recon.schema import INGESTED_AT, LINEAGE_COLUMNS
+from recon.schema import CURRENCY, INGESTED_AT, LINEAGE_COLUMNS
 from recon.timing import StageTimer
 
-RULE_VERSION = "1.9.0"  # bump whenever funnel logic changes
+RULE_VERSION = "2.2.0"  # bump whenever funnel logic changes
 
 HASH_COLUMNS = ("oms_row_hash", "bank_row_hash", "logistics_row_hash", "settlement_row_hash")
 
@@ -32,6 +32,8 @@ class FunnelContext:
     order_ref_patterns: tuple[str, ...] = ()  # the chains' own order-reference patterns (see linking)
     marketplaces: dict[str, Channel] = field(default_factory=dict)  # OMS channel value -> marketplace channel
     cod_channels: tuple[str, ...] = ()  # OMS channel values whose COD orders are paid by carrier remittances
+    channels: dict[str, Channel] = field(default_factory=dict)  # every declared channel, for its payment terms
+    period: Period | None = None  # with a cut-off, money not yet due is OPEN (see funnel.periods)
     # Settlement batch results: payouts (funnel.settlement) and remittances (funnel.remittance).
     batches: pd.DataFrame | None = None
     payout_credit_rows: frozenset[int] = frozenset()  # bank source rows naming a batch: not free to link
@@ -55,6 +57,18 @@ def pass_on(units: pd.DataFrame) -> StepOutcome:
 def cod_remittance(frame: pd.DataFrame) -> pd.Series:
     """What the 3PL remits for a COD order: cash collected less shipping and COD fees (missing = 0)."""
     return frame["cod_collected"].fillna(0) - frame["ship_fee"].fillna(0) - frame["cod_fee"].fillna(0)
+
+
+def fee_currency(frame: pd.DataFrame) -> pd.Series:
+    """The currency a unit's fees are computed in: its order's (credits are converted into it), else its credit's.
+
+    None where no feed carries a currency.
+    """
+    currency = pd.Series(None, index=frame.index, dtype=object)
+    for column in (f"{CURRENCY}_oms", CURRENCY, f"{CURRENCY}_bank"):
+        if column in frame:
+            currency = currency.where(currency.notna(), frame[column].astype(object))
+    return currency.where(currency.notna(), None)
 
 
 @dataclass(frozen=True)

@@ -1,0 +1,154 @@
+{
+  "feeds": {
+    "oms": {
+      "path": "oms_orders.csv",
+      "format": "csv",
+      "encoding": "utf-8",
+      "date_format": null
+    },
+    "bank": {
+      "path": "bank_statement.csv",
+      "format": "csv",
+      "encoding": "utf-8",
+      "date_format": null
+    },
+    "logistics": {
+      "path": "logistics_report.csv",
+      "format": "csv",
+      "encoding": "utf-8",
+      "date_format": null
+    },
+    "shopee": {
+      "path": "shopee_settlement.csv",
+      "format": "csv",
+      "encoding": "utf-8",
+      "date_format": "%d/%m/%Y",
+      "role": "settlement"
+    },
+    "tiktok": {
+      "path": "tiktok_settlement.csv",
+      "format": "csv",
+      "encoding": "utf-8",
+      "date_format": "%Y/%m/%d %H:%M:%S",
+      "role": "settlement"
+    }
+  },
+  "channels": {
+    "website": {
+      "cod_remittances": true,
+      "payout_weekdays": [
+        0,
+        2,
+        4
+      ],
+      "ship_days": 7
+    },
+    "shopee": {
+      "chain": "marketplace",
+      "settlement": "shopee",
+      "fee_bps": 1300,
+      "amount_tolerance": 1,
+      "release_days": 3,
+      "payout_weekdays": [
+        1
+      ],
+      "settlement_days": 45
+    },
+    "tiktok": {
+      "chain": "marketplace",
+      "settlement": "tiktok",
+      "fee_bps": 1000,
+      "amount_tolerance": 1,
+      "release_days": 7,
+      "payout_weekdays": [
+        0,
+        3
+      ],
+      "settlement_days": 45
+    },
+    "facebook": {
+      "cod_remittances": true,
+      "payout_weekdays": [
+        0,
+        2,
+        4
+      ],
+      "ship_days": 7
+    }
+  },
+  "mapping": {
+    "oms": {
+      "order_id": "order_id",
+      "tracking_no": "tracking_no",
+      "payment_method": "payment_method",
+      "order_amount": "order_amount",
+      "ordered_at": "ordered_at",
+      "customer_name": "customer_name",
+      "channel": "channel",
+      "channel_order_no": "channel_order_no",
+      "item_total": "item_total"
+    },
+    "bank": {
+      "txn_ref": "txn_ref",
+      "description": "description",
+      "credit_amount": "credit_amount",
+      "fee_amount": "fee_amount",
+      "net_amount": "net_amount",
+      "value_date": "value_date"
+    },
+    "logistics": {
+      "tracking_code": "tracking_code",
+      "client_order_code": "client_order_code",
+      "cod_collected": "cod_collected",
+      "ship_fee": "ship_fee",
+      "cod_fee": "cod_fee",
+      "remittance_id": "remittance_id",
+      "status": "status"
+    },
+    "shopee": {
+      "order_no": "M\u00e3 \u0111\u01a1n h\u00e0ng",
+      "payout_id": "M\u00e3 thanh to\u00e1n",
+      "gross": "Gi\u00e1 s\u1ea3n ph\u1ea9m",
+      "fee_fixed": "Ph\u00ed c\u1ed1 \u0111\u1ecbnh",
+      "fee_payment": "Ph\u00ed thanh to\u00e1n",
+      "refund": "Ho\u00e0n ti\u1ec1n",
+      "net": "T\u1ed5ng ti\u1ec1n \u0111\u00e3 thanh to\u00e1n",
+      "settled_at": "Ng\u00e0y ho\u00e0n th\u00e0nh thanh to\u00e1n"
+    },
+    "tiktok": {
+      "order_no": "Order ID",
+      "payout_id": "Statement ID",
+      "gross": "Total revenue",
+      "fee_commission": "Platform commission",
+      "fee_transaction": "Transaction fee",
+      "refund": "Refund",
+      "net": "Total settlement amount",
+      "settled_at": "Order settled time"
+    }
+  },
+  "policy": {
+    "mdr_bps": 110,
+    "payment_type_fee_bps": {
+      "bank_transfer": 0,
+      "wallet": 110
+    },
+    "cod_fee_bps": 80,
+    "payer_pattern": "^[A-Z]+\\.\\d+\\.(?P<payer>[A-Z ]+?) chuyen tien",
+    "amount_tolerance": 1000,
+    "status_policy": {
+      "delivered": [
+        "payment",
+        "shipment"
+      ],
+      "shipped": [
+        "payment",
+        "shipment"
+      ]
+    }
+  },
+  "period": {
+    "cutoff": "2026-04-30",
+    "grace_days": 3
+  },
+  "resolutions": []
+}

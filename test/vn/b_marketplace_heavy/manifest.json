@@ -1,6 +1,6 @@
 {
   "generator": "recon.channeldata",
-  "generator_version": "2.5.0",
+  "generator_version": "2.6.0",
   "market": "vn",
   "source": "brazil ecom",
   "source_files": [
@@ -145,14 +145,19 @@
     "tiktok_settlement.csv": {
       "rows": 670,
       "sha256": "0fcd21953384bd698ca3f0c73fc9db98e46b76827b73421e998976fcc97213a4"
-    },
-    "ground_truth.csv": {
-      "rows": 1541,
-      "sha256": "d942c5e5d29ee77ff71767d17553deca52ee27eaa8b039a0d0ea786eae1ebb9f"
-    },
-    "links.csv": {
-      "rows": 3624,
-      "sha256": "c9040053cb6f75408fcfe86670f93fe9e650f0caff1e0dc0a0201f7f709b0451"
+    }
+  },
+  "labels": {
+    "folder": "../labels/b_marketplace_heavy",
+    "files": {
+      "ground_truth.csv": {
+        "rows": 1541,
+        "sha256": "95024891181821b6f861cf6a4396f0bde9b6b7c03d78316fe08d99ae117c04ef"
+      },
+      "links.csv": {
+        "rows": 3624,
+        "sha256": "c9040053cb6f75408fcfe86670f93fe9e650f0caff1e0dc0a0201f7f709b0451"
+      }
     }
   },
   "baseline": {
@@ -160,12 +165,13 @@
     "warnings_acknowledged": 12,
     "decisions": {
       "AUTO_ACCEPT": 1330,
-      "EXCEPTION": 208,
+      "EXCEPTION": 109,
+      "OPEN": 99,
       "REVIEW": 3
     },
-    "accuracy": 0.9980532121998702,
+    "accuracy": 1.0,
     "auto_accept_precision": 1.0,
-    "orphans": 37,
+    "orphans": 3,
     "links": {
       "precision": 1.0,
       "recall": 0.9989875126560918,

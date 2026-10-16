@@ -66,6 +66,20 @@ def _missing_remittance(row: Row) -> str:
 
 
 def _missing_payment(row: Row) -> str:
+    due = _value(row, "due_date")
+    return _missing_money(row) + (f" It was due by {due}." if due else "")
+
+
+def _not_yet_due(row: Row) -> str:
+    due, cutoff = _value(row, "due_date"), _value(row, "cutoff")
+    if _value(row, "waiting_for") == "shipment":
+        return f"Not shipped yet, and not due to ship until {due} (cut-off {cutoff}): an open item, carried " \
+               "into the next period."
+    when = f"not due until {due}" if due else "not due before its shipment is delivered"
+    return f"Its money is {when} (cut-off {cutoff}): an open item, carried into the next period."
+
+
+def _missing_money(row: Row) -> str:
     if _remitted(row):
         return _missing_remittance(row)
     if not _value(row, "settlement_feed"):
@@ -74,6 +88,14 @@ def _missing_payment(row: Row) -> str:
     if payout is None:
         return f"No line for this order in {_report(row)}."
     return f"Payout {payout} in {_report(row)} pays this order, but no bank credit names it."
+
+
+def _report_missing(row: Row) -> str:
+    listed = str(_value(row, "payout_candidates") or "").split("|")
+    refs = ", ".join(item.rsplit(":", 1)[0] for item in listed if item)
+    return (f"No settlement report for {_value(row, 'channel')}, so its payouts can only be matched by amount: "
+            f"{len(listed)} payout credit(s) may include this order ({refs}). A reviewer matches it, or loads "
+            "the report.")
 
 
 def _batch_mismatch(row: Row) -> str:
@@ -179,6 +201,7 @@ SENTENCES: dict[str, Callable[[Row], str]] = {
     "ORDER_STATUS_REQUIRES_POLICY": lambda row: (
         f"Order status {_status(row)} has no evidence policy yet; a business decision is needed."),
     "MISSING_PAYMENT": _missing_payment,
+    "NOT_YET_DUE": _not_yet_due,
     "SETTLEMENT_TIE_OUT": lambda row: (
         f"The order ties out against its line in {_report(row)}, and payout "
         f"{_value(row, 'settlement_payout_id')} ties out against its bank credit."),
@@ -186,6 +209,7 @@ SENTENCES: dict[str, Callable[[Row], str]] = {
         f"Shipment {_value(row, 'tracking_code')} collected the order amount, and remittance "
         f"{_value(row, 'batch_id')} ties out against its bank credit."),
     "SETTLEMENT_BATCH_MISMATCH": _batch_mismatch,
+    "SETTLEMENT_REPORT_MISSING": _report_missing,
     "PAYOUT_CREDIT_AMBIGUOUS": lambda row: (
         f"Several bank credits name {_batch(row)}; a reviewer picks the one that pays it."),
     "CURRENCY_MISMATCH": _currency_mismatch,
@@ -194,7 +218,8 @@ SENTENCES: dict[str, Callable[[Row], str]] = {
     "FX_DIFFERENCE": _fx_difference,
     "AMOUNT_MISMATCH": _amount_mismatch,
     "DUPLICATE_PAYMENT": _duplicate_payment,
-    "MISSING_SHIPMENT": lambda row: "No shipment found for this order.",
+    "MISSING_SHIPMENT": lambda row: "No shipment found for this order." + (
+        f" It was due to ship by {_value(row, 'due_date')}." if _value(row, "due_date") else ""),
     "FEE_MISMATCH": lambda row: (_line_fees(row) if _value(row, "settlement_feed")
                                  else _difference("The bank fee", _value(row, "fee_delta"), _fee_rate(row))),
     "COD_FEE_MISMATCH": lambda row: _difference("The COD fee", _value(row, "cod_fee_delta"), "the contract fee"),
@@ -220,7 +245,8 @@ COLUMNS = ("reason_codes", "confidence", "payment_method", "order_status", "cred
            "expected_credit", "fx_rate", "fx_rate_source", "fx_rate_date", "fx_converted", "fx_rate_missing",
            "installments", "installments_bank", "settlement_feed", "settlement_payout_id", "settlement_refund",
            "settlement_gross_delta", "settlement_fee_delta", "settlement_fee_bps", "batch_tie_out_delta",
-           "batch_kind", "batch_id", "tracking_code", "shipment_returned", "txn_ref")
+           "batch_kind", "batch_id", "tracking_code", "shipment_returned", "txn_ref", "due_date", "cutoff", "waiting_for", "channel",
+           "payout_candidates")
 
 
 def explain_all(frame: pd.DataFrame) -> list[str]:

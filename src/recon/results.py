@@ -89,7 +89,9 @@ class ReconRun:
     orphans: pd.DataFrame = field(default_factory=pd.DataFrame)  # unlinked bank/logistics records
     # rows a resolution took out of the run, with issue id and reason (EXCLUDED_COLUMNS)
     excluded: pd.DataFrame = field(default_factory=lambda: pd.DataFrame(columns=list(EXCLUDED_COLUMNS)))
-    settlement_batches: pd.DataFrame = field(default_factory=pd.DataFrame)  # one row per payout of a report
+    settlement_batches: pd.DataFrame = field(default_factory=pd.DataFrame)  # one row per payout or remittance
+    # OPEN units as OMS rows with their due date and cut-off: the next run's `open_items` input
+    open_items: pd.DataFrame = field(default_factory=pd.DataFrame)
 
     @property
     def blocked(self) -> bool:
@@ -123,6 +125,7 @@ class ReconRun:
             "funnel.csv": self.funnel.to_csv(index=False),
             "excluded.csv": self.excluded.to_csv(index=False),
             "settlement_batches.csv": self.settlement_batches.to_csv(index=False),
+            "open_items.csv": self.open_items.to_csv(index=False),
         }
         performance = self.manifest.get("performance")
         if performance is not None:

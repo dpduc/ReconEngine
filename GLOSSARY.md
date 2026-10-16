@@ -34,6 +34,10 @@ _Avoid_: settlement row, escrow line
 A settlement batch from a carrier: the COD it collected, less shipping and COD fees.
 _Avoid_: COD payout
 
+**Channel tie-out**:
+A channel's payout credits in a period compared with the expected net of its orders, when its settlement report is missing.
+_Avoid_: channel reconciliation, control total
+
 **Split payment**:
 One order paid in several bank credits, such as a deposit and the rest; the credits are compared as a total.
 _Avoid_: partial payment (for a credit that is simply short)
@@ -57,7 +61,7 @@ What the engine concludes about a unit: auto-accept, review, exception or open.
 _Avoid_: outcome, status, result
 
 **Open item**:
-A unit whose money is not yet due at the cut-off; it is carried into the next period.
+A unit whose money or shipment is not yet due at the cut-off; it is carried into the next period.
 _Avoid_: pending, in transit (as decision names)
 
 ## Periods
@@ -69,3 +73,7 @@ _Avoid_: month (periods need not be months), window
 **Cut-off**:
 The moment after which money and shipments no longer count for the period.
 _Avoid_: statement date, close date
+
+**Due date**:
+The day by which an order's money or shipment should have arrived, by its channel's payment terms plus a grace period.
+_Avoid_: deadline, expected date

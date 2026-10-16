@@ -87,8 +87,9 @@ TIMESTAMP_COLUMNS: dict[str, tuple[str, ...]] = {
 }
 
 # Unit decisions. Every unit ends with exactly one; the exception queue holds the last two.
-AUTO_ACCEPT, REVIEW, EXCEPTION = "AUTO_ACCEPT", "REVIEW", "EXCEPTION"
-DECISIONS = (AUTO_ACCEPT, REVIEW, EXCEPTION)
+# OPEN: money not yet due at the period's cut-off, carried into the next period (ADR 0002).
+AUTO_ACCEPT, REVIEW, EXCEPTION, OPEN = "AUTO_ACCEPT", "REVIEW", "EXCEPTION", "OPEN"
+DECISIONS = (AUTO_ACCEPT, REVIEW, EXCEPTION, OPEN)
 
 
 def numeric_columns(kind: str, columns) -> tuple[str, ...]:

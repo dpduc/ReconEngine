@@ -3,6 +3,7 @@
 from pathlib import Path
 
 from recon.acknowledgement import acknowledge_warnings
+from recon.channeldata import labels_for
 from recon.config import FeedSpec, Policy, RunConfig
 from recon.pipeline import inspect, load_config, run
 
@@ -66,9 +67,9 @@ def test_a_payment_type_without_a_rate_is_a_warning_and_falls_back_to_the_mdr(tm
 
 
 def test_no_fee_mismatch_in_the_vietnamese_sets_comes_from_a_bank_transfer():
-    for folder in sorted((ROOT / "test" / "vn").iterdir()):
+    for folder in sorted(config.parent for config in (ROOT / "test" / "vn").rglob("config.json")):
         config = load_config(folder / "config.json")
-        results = run(folder, acknowledge_warnings(config, inspect(folder, config), "test")).results
+        results = run(folder, acknowledge_warnings(config, inspect(folder, config), "test"), labels=labels_for(folder)).results
         fee = results[results["reason_codes"].str.split("|").map(lambda codes: "FEE_MISMATCH" in codes)]
         assert not fee["payment_type_bank"].eq("bank_transfer").any(), folder.name
         assert fee["truth_exception"].eq("FEE_MISMATCH").all(), folder.name

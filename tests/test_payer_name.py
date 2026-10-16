@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from recon.acknowledgement import acknowledge_warnings
+from recon.channeldata import labels_for
 from recon.config import FeedSpec, Policy, RunConfig
 from recon.evaluation import metrics
 from recon.funnel.linking import normalize_name
@@ -86,7 +87,7 @@ def test_normalized_names_drop_diacritics_case_and_spacing():
 def test_the_social_heavy_set_auto_accepts_no_wrong_payer():
     folder = ROOT / "test" / "vn" / "c_social_heavy"
     config = load_config(folder / "config.json")
-    results = run(folder, acknowledge_warnings(config, inspect(folder, config), "test")).results
+    results = run(folder, acknowledge_warnings(config, inspect(folder, config), "test"), labels=labels_for(folder)).results
 
     assert metrics(results)["auto_accept_precision"] == 1.0
     accepted = results[results["decision"].eq("AUTO_ACCEPT")]

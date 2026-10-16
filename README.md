@@ -37,11 +37,25 @@ streamlit run app.py
 
 `python -m recon.olistdata` keeps every source order by default. Pass `--rows N` for a smaller sample.
 
+## Running a folder from the terminal
+
+A folder with its own `config.json` runs in one command:
+
+```powershell
+python -m recon run test/vn/b_marketplace_heavy --labels test/vn/labels/b_marketplace_heavy --acknowledge "seen"
+```
+
+Health runs first. Blocking issues stop the run, and so do warnings still open without `--acknowledge "<note>"`,
+which accepts every open warning with that note. Either way the issues are listed and the exit code is 1. Otherwise
+the export bundle and `health_report.json` are written to `--out` (`runs/<folder name>` by default), and the decision
+counts, queue, open items and orphans are printed. `--labels` names a folder holding `ground_truth.csv` and/or
+`links.csv`; with it, accuracy and link metrics are printed too. A run never reads labels from the inputs' folder.
+
 ## The wizard
 
 | Step | What happens |
 |---|---|
-| **Load** | Upload the OMS, bank and logistics files (CSV, XLSX or Parquet), or point at a **local folder** and pick a file for each feed. Uploads stay in memory and folder files are read in place, so no copies are written to disk. Local-folder mode only works when the app runs on the machine that holds the folder. The engine suggests a column mapping from column names and value patterns, and flags any suggestion it isn't sure of; nothing is mapped silently. An optional currency column (e.g. `Ccy`) is suggested when its header and values clearly match. A confirmed mapping can be saved as a profile and reused. |
+| **Load** | Upload the OMS, bank and logistics files (CSV, XLSX or Parquet), or point at a **local folder** and pick a file for each feed. A folder with its own `config.json` is loaded by that config as it is (feeds, mapping, channels and policy), skipping the mapping step. Uploads stay in memory and folder files are read in place, so no copies are written to disk. Local-folder mode only works when the app runs on the machine that holds the folder. The engine suggests a column mapping from column names and value patterns, and flags any suggestion it isn't sure of; nothing is mapped silently. An optional currency column (e.g. `Ccy`) is suggested when its header and values clearly match. A confirmed mapping can be saved as a profile and reused. |
 | **Health** | The Health Report groups issues by severity (blocking / warning / info), with affected-row counts, sample rows and profiles. Each issue explains in plain language what was found and what happens to the affected records, and warns when it touches an implausibly large share of a file. It can be downloaded as JSON or as a standalone HTML page, both including this guidance. |
 | **Fix** | Issues are split into **Needs your decision** (blocking issues, uncovered order statuses, currency mismatches) and **Sign-off only** (findings the run already flags as exceptions). Each issue has a recommended option preselected, with the reason. Sign-off issues can be acknowledged together with one note. Each choice is written into the run config and the checks run again. The run config can be downloaded. |
 | **Run** | Available only once the gate is open. Runs the funnel and shows the counts at each step. |
@@ -68,12 +82,15 @@ config = load_config("configs/olist_benchmark.json")
 # sources: a folder, or the files themselves in memory as {relative path: bytes}
 report = inspect("data/generated", config)   # HealthReport: issues, profiles, gate_open
 outcome = run("data/generated", config)      # ReconRun, or a "blocked" run listing the open issues
+# labels: a folder (or in-memory files) with ground_truth.csv and/or links.csv, to score the run
+scored = run("test/vn/c_social_heavy", config, labels="test/vn/labels/c_social_heavy")
 outcome.results          # one row per unit: deciding step, decision, reason codes, deltas, explanation
 outcome.exception_queue  # EXCEPTION + REVIEW units and orphans, ranked
 outcome.close_watchlist # auto-accepted with a note; revisit first if the period won't close
 outcome.settlement_batches  # one row per settlement batch (payout or remittance): its lines, credit and tie-out
+outcome.open_items       # OPEN units as OMS rows with their due date: the next run's `open_items` input
 outcome.bundle()         # decisions, triage queue, exception queue, orphans, close watchlist, funnel, excluded rows,
-                         # settlement batches, manifest
+                         # settlement batches, open items, manifest
 ```
 
 ### Expert handoff
@@ -108,11 +125,19 @@ A run config is a JSON file (or YAML, if PyYAML is installed) with these parts:
 - `channels`: optional. Each OMS `channel` value names its money chain. Without channels, every order is on one prepaid chain with the default pattern. When channels are declared, orders of an undeclared channel are a Health warning.
   - `prepaid`: optionally, the `order_ref_pattern` that finds its orders in a bank description (named group `ref`, e.g. `"DON (?P<ref>#\\d+)"`).
   - `marketplace`: `settlement` names the channel's settlement report. An order links to its line by the OMS `channel_order_no`, and the line's payout to the bank credit whose description (or `payout_id` column) names it. `fee_bps` is the channel's total fee on a line's gross (unset: fees are not checked). A line's gross is compared with the OMS `item_total` when mapped, else with `order_amount`. `amount_tolerance` overrides the policy's for the channel's checks.
+    - Without its report, a marketplace channel names `payout_pattern` instead: a regex that finds its payout credits in bank descriptions (named group `payout`). See [Payouts without a settlement report](#payouts-without-a-settlement-report).
   - `cod_remittances` (any chain): the channel's COD orders are paid by carrier remittances. An order links to its shipment by order reference, and the shipment's `remittance_id` (a logistics column) to the bank credit whose description names it. A shipment whose logistics `status` is `RETURNED` collected nothing. The COD fee is checked against the policy's `cod_fee_bps`. Without it, each COD order is paid by a credit of its own.
+  - Payment terms (any chain), for a run with a `period`: `release_days` and `payout_weekdays` (0 = Monday) say when a delivered COD or marketplace order's money is due, `settlement_days` when one with no shipment record is, and `ship_days` when a shipment is due. A prepaid order's money is due on its order date. See [Periods and open items](#periods-and-open-items).
 - `mapping`: canonical column → source column, for each feed.
 - `policy`: absolute amount tolerance (default 0.01), date window for linking (default ±4 days), fee rates (`mdr_bps`, overridden per bank `payment_type` by `payment_type_fee_bps`, e.g. `{"bank_transfer": 0, "wallet": 110}`), `payer_pattern` (a regex with a named group `payer` that finds the payer in a bank description, when the bank feed has no `payer_name` column; compared with the OMS `customer_name` in linking pass 2), a `status_policy` that says which order statuses need payment and/or shipment evidence, and an optional `fx` setting (see [Currencies and FX](#currencies-and-fx)).
 - `resolutions`: the fixes and acknowledgements recorded in the Fix step.
-- `ground_truth`: optional. When set, precision and recall are reported for each reason code.
+- `period`: optional. Its `cutoff` (an ISO date) is the period's last day; `grace_days` (default 3) are added to
+  every due date. Without a period, missing money and shipments are always exceptions.
+- `open_items`: optional. The previous run's `open_items.csv`; its orders join this run.
+- `ground_truth`: optional. Each order's expected outcome: `PASS_1` / `PASS_2` (auto-accept), `REVIEW`, `EXCEPTION`
+  or `OPEN`. Accuracy scores the four decisions, and precision and recall are reported for each reason code.
+  This names a file next to the inputs, as the Olist benchmark keeps it. Labels in a folder of their own come in
+  through `run(..., labels=...)` or `--labels` instead, and are read as `ground_truth.csv` and `links.csv`.
 
 `configs/olist_benchmark.json` is the config for the benchmark, with every warning acknowledged.
 
@@ -171,6 +196,8 @@ A feed may mix currencies. Each linked order and credit are compared in their ow
 
 Each converted unit records the rate, its source and its date in its results and explanation, and keeps the original amounts. The manifest records the FX setting and the rate table's hash.
 
+Expected fees are computed in the currency's minor unit, rounded half-up: R$ 99.90 at 399 bps is 3.99, and VND (no minor unit) is rounded to whole đồng. A currency not in the table has two decimals; a run whose feeds carry no currency counts in whole units.
+
 ## The funnel
 
 Each step only sees the units that earlier steps left undecided. Eligibility
@@ -183,21 +210,56 @@ missing shipments.
 | 1 | `missing_source_evidence` | `MISSING_SOURCE_EVIDENCE`: no order amount |
 | 2 | `status_policy` | `ORDER_STATUS_REQUIRES_POLICY`: a status the policy doesn't cover |
 | 3 | `settle_marketplace` | every order of a marketplace channel, along its chain: `MISSING_PAYMENT` (no line, or no credit for its payout) → `AMOUNT_MISMATCH` (refund, or gross off the order) → `FEE_MISMATCH` (fees off the channel's terms) → REVIEW `SETTLEMENT_BATCH_MISMATCH` (the payout credit differs from its lines' net) → `AUTO_ACCEPT` `SETTLEMENT_TIE_OUT` |
-| 4 | `settle_cod` | every COD order of a `cod_remittances` channel, along its chain: `MISSING_SHIPMENT` → `MISSING_PAYMENT` (returned, on no remittance yet, or no credit for its remittance) → `AMOUNT_MISMATCH` (COD collected off the order) → `COD_FEE_MISMATCH` → REVIEW `SETTLEMENT_BATCH_MISMATCH` (the remittance credit differs from its shipments' COD less fees) → `AUTO_ACCEPT` `REMITTANCE_TIE_OUT` |
-| 5 | `link_exact` | links one-to-one on references (structured `order_ref`, or extracted from the bank description). Several credits naming the same order link as one split payment, compared as their total |
-| 6 | `link_constrained` | links on same currency, amount within tolerance and date within the window, skipping payout and remittance credits. Never auto-matches when several candidates qualify, and never links a credit from a different payer than the order's customer. An order whose customer paid in several credits links to them as a split payment (`constrained_split`) when every free credit from that payer within the window together pays it, and no other open order of the customer has them in its window |
-| 7 | `link_candidates` | REVIEW with `LINK_CANDIDATES`: proposes candidates with a confidence score, never auto-accepted |
-| 8 | `route_review` | REVIEW: duplicate keys whose strategy is "route to review" |
-| 9 | rule checks | `MISSING_PAYMENT` → `CURRENCY_MISMATCH` → `DUPLICATE_PAYMENT` (several credits, one of which alone pays the order) → `FX_DIFFERENCE` → `AMOUNT_MISMATCH` → `MISSING_SHIPMENT` → fee / COD fee → `TIMING_MISMATCH` → `POSSIBLE_INSTALLMENT_INTEREST` (REVIEW) |
-| 10 | `decision` | `AUTO_ACCEPT` (`INSTALLMENT_INTEREST` when the stated interest explains the delta) |
-| 11 | `reverse_pass` | `ORPHAN_PAYMENT` / `ORPHAN_SHIPMENT`: bank or 3PL records that link to no order (payout and remittance credits are reported on their settlement batch instead) |
+| 4 | `settle_reportless` | every order of a marketplace channel without a settlement report: REVIEW `SETTLEMENT_REPORT_MISSING` with the payouts that may include it, never `AUTO_ACCEPT` (missing money when none can) |
+| 5 | `settle_cod` | every COD order of a `cod_remittances` channel, along its chain: `MISSING_SHIPMENT` → `MISSING_PAYMENT` (returned, on no remittance yet, or no credit for its remittance) → `AMOUNT_MISMATCH` (COD collected off the order) → `COD_FEE_MISMATCH` → REVIEW `SETTLEMENT_BATCH_MISMATCH` (the remittance credit differs from its shipments' COD less fees) → `AUTO_ACCEPT` `REMITTANCE_TIE_OUT` |
+| 6 | `link_exact` | links one-to-one on references (structured `order_ref`, or extracted from the bank description). Several credits naming the same order link as one split payment, compared as their total |
+| 7 | `link_constrained` | links on same currency, amount within tolerance and date within the window, skipping payout and remittance credits. Never auto-matches when several candidates qualify, and never links a credit from a different payer than the order's customer. An order whose customer paid in several credits links to them as a split payment (`constrained_split`) when every free credit from that payer within the window together pays it, and no other open order of the customer has them in its window |
+| 8 | `link_candidates` | REVIEW with `LINK_CANDIDATES`: proposes candidates with a confidence score, never auto-accepted |
+| 9 | `route_review` | REVIEW: duplicate keys whose strategy is "route to review" |
+| 10 | rule checks | `MISSING_PAYMENT` → `CURRENCY_MISMATCH` → `DUPLICATE_PAYMENT` (several credits, one of which alone pays the order) → `FX_DIFFERENCE` → `AMOUNT_MISMATCH` → `MISSING_SHIPMENT` → fee / COD fee → `TIMING_MISMATCH` → `POSSIBLE_INSTALLMENT_INTEREST` (REVIEW) |
+| 11 | `decision` | `AUTO_ACCEPT` (`INSTALLMENT_INTEREST` when the stated interest explains the delta) |
+| 12 | `reverse_pass` | `ORPHAN_PAYMENT` / `ORPHAN_SHIPMENT`: bank or 3PL records that link to no order (payout and remittance credits, and the shipments on a remittance, are reported on their settlement batch instead) |
 
 Each unit gets one reason code (the first check it fails) and a plain-language
 explanation. A problem on a marketplace order's own line, or a COD order's own shipment, is reported on that order even
 when its batch is also off.
-Each settlement batch gets its own result (`BATCH_TIE_OUT`, `MISSING_PAYMENT`, `SETTLEMENT_BATCH_MISMATCH` or
-`PAYOUT_CREDIT_AMBIGUOUS`), with the orders of the run among its lines and those that are exceptions. It also records the step that decided it, the rule version and the
+Each settlement batch gets its own result (`BATCH_TIE_OUT`, `MISSING_PAYMENT`, `SETTLEMENT_BATCH_MISMATCH`,
+`PAYOUT_CREDIT_AMBIGUOUS`, OPEN `NOT_YET_DUE` when none of its orders is due yet, or REVIEW `SETTLEMENT_REPORT_MISSING`), with the orders of the run among its lines and those that are exceptions. It also records the step that decided it, the rule version and the
 hashes of the input rows behind it.
+
+### Payouts without a settlement report
+
+Without its settlement report, a payout credit can only be matched to orders by amount: an order's expected net is
+its gross less the channel's `fee_bps`. Beyond a handful of orders, a great many order sets add up to the same
+credit. On VN set B with its reports removed, payouts hold 34–226 orders from pools of 125–381, and no search can
+tell the true set apart. So:
+
+- **Payout credits:** each is a batch in REVIEW `SETTLEMENT_REPORT_MISSING`, listing its candidate orders (the
+  channel's orders placed in the `settlement_days` before it, 45 without). A pool of at most 25 orders is searched
+  for the order sets whose net adds up to the credit, within a step and time limit. The batch lists them when there
+  are at most 3; otherwise `search` says why not (too many orders, too many sets, no set, or the bound).
+- **Orders:** each is REVIEW, listing the payouts that may include it. The best-scored payout is the one nearest the
+  day its money is expected (order date + the run's median days to delivery + the channel's `release_days`). An order
+  no payout can include is missing money (OPEN while not yet due). Nothing is auto-accepted, and the payout credits
+  are never linked by amount or reported as orphans.
+- **Channel tie-out:** the manifest's `channel_tie_outs` compare the channel's payout credits with the expected net of
+  the orders they may include. The difference also holds money for orders outside the run (last month's).
+
+On VN set B with its reports removed, every order's true payout is among its candidates, and the top one is right for
+40% of orders (51–65% on the other sets). No payout's true order set is found: the pools are too big, or the payout
+also pays last month's orders. Loading the report remains the fix; the REVIEW says so.
+
+### Periods and open items
+
+A run with a `period` reconciles up to its cut-off. Wherever money or a shipment is missing because it has not
+arrived, the order is checked against its due date (plus the grace days):
+
+- **Not yet due:** OPEN `NOT_YET_DUE`, a fourth decision. The order is an open item, exported in `open_items.csv`.
+- **Overdue:** `MISSING_PAYMENT` or `MISSING_SHIPMENT` as before, with the due date in the explanation.
+
+The next run takes that file as `open_items`. Its orders join the run's own orders, so credits, settlement lines and
+parcels for them link to them instead of becoming orphans. The manifest reports how many were carried in, cleared,
+still open or now in the queue.
 
 ## Benchmark results
 
@@ -235,11 +297,12 @@ then reports:
 
 On the Olist benchmark, all 196,078 links are made in pass 1 and are correct.
 
-The Vietnamese multi-channel sets (`test/vn`) record a baseline in their manifests. Marketplace orders are settled
+The Vietnamese multi-channel sets (`test/vn`) record a baseline in their manifests. Their labels are kept apart, in
+`test/vn/labels/<set>/`, so running a set's folder never reads the answers. Marketplace orders are settled
 through their Shopee and TikTok Shop reports and COD orders through the GHN, GHTK and J&T remittances, so every
-settlement line, payout credit and remittance credit is linked, and split transfers link as a group. Accuracy is
-96.7–100% with an auto-accept precision of 1.0; the orders still wrong are payer-name cases whose truth is REVIEW,
-which the scoring counts as wrong (#43).
+settlement line, payout credit and remittance credit is linked, and split transfers link as a group. Money due
+after the cut-off is OPEN. Every set scores 100% on the four decisions, with an auto-accept precision of 1.0.
+`d_two_periods` is one seller over two months: `period_2` takes `period_1`'s open items and clears them.
 
 **Known gaps in the benchmark:**
 
@@ -285,11 +348,13 @@ src/recon/
 ├── resolutions.py    # applies resolutions: remap, exclusions, duplicates, dates, status policy
 ├── funnel/           # ordered steps: eligibility, linking, routing, rules, decision, orphans
 ├── results.py        # ReconRun, exception queue, export bundle
+├── cli.py            # python -m recon run <folder>: Health, run, bundle
 ├── handoff.py        # resolution actions, append-only audit log, handoff metrics, close status
 ├── evaluation.py     # ground truth, per-reason-code metrics
 ├── olistdata.py      # builds the Olist benchmark feeds
 ├── perf.py           # runtime and cost harness, writes reports/performance.md
 ├── timing.py         # stage timer and per-run peak memory
+├── channeldata.py    # builds the Vietnamese multi-channel sets (test/vn) and their labels (test/vn/labels)
 └── mockdata.py       # synthetic feed generator
 app.py, app_pages/, recon_app/   # Streamlit wizard over recon.pipeline
 configs/olist_benchmark.json     # benchmark run config
@@ -312,5 +377,5 @@ tests of the wizard. The benchmark tests need `data/generated/`; see Quick start
 
 - **Shared audit log:** the log is a local file, so experts working on different machines don't share it.
 - **Infrastructure:** PostgreSQL sources, and dedup across repeated ingests of the same file.
-- **Matching beyond one-to-one:** batches without a settlement report.
+- **Matching beyond one-to-one:** telling a payout's true orders apart without its settlement report (see [Payouts without a settlement report](#payouts-without-a-settlement-report)).
 - **Packaging:** Docker.

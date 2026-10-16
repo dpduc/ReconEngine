@@ -7,6 +7,7 @@ import pandas as pd
 import pytest
 
 from recon.acknowledgement import acknowledge_warnings
+from recon.channeldata import labels_for
 from recon.config import MARKETPLACE, Channel, FeedSpec, Policy, RunConfig
 from recon.evaluation import link_metrics
 from recon.pipeline import inspect, load_config, run
@@ -141,7 +142,7 @@ def test_a_marketplace_channel_names_a_settlement_report():
 def test_the_marketplace_set_auto_accepts_every_correct_payout_and_flags_each_wrong_line():
     folder = ROOT / "test" / "vn" / "b_marketplace_heavy"
     config = load_config(folder / "config.json")
-    outcome = run(folder, acknowledge_warnings(config, inspect(folder, config), "test"))
+    outcome = run(folder, acknowledge_warnings(config, inspect(folder, config), "test"), labels=labels_for(folder))
     market = outcome.results[outcome.results["channel"].isin(["shopee", "tiktok"])].set_index("scenario")
 
     assert set(market.loc["MATCHED", "decision"]) == {"AUTO_ACCEPT"}
