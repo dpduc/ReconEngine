@@ -1,6 +1,6 @@
 {
   "generator": "recon.channeldata",
-  "generator_version": "2.4.0",
+  "generator_version": "2.5.0",
   "market": "vn",
   "source": "brazil ecom",
   "source_files": [
@@ -159,19 +159,19 @@
     "status": "COMPLETED",
     "warnings_acknowledged": 12,
     "decisions": {
-      "AUTO_ACCEPT": 1171,
-      "EXCEPTION": 365,
-      "REVIEW": 5
+      "AUTO_ACCEPT": 1327,
+      "EXCEPTION": 211,
+      "REVIEW": 3
     },
-    "accuracy": 0.8948734587929915,
+    "accuracy": 0.9961064243997404,
     "auto_accept_precision": 1.0,
-    "orphans": 86,
+    "orphans": 43,
     "links": {
-      "precision": 0.9996265870052278,
-      "recall": 0.9034762065474181,
+      "precision": 1.0,
+      "recall": 0.9969625379682754,
       "recall_per_link_kind": {
-        "bank:cod_remittance": 0.0,
-        "bank:name_amount": 0.8918918918918919,
+        "bank:cod_remittance": 1.0,
+        "bank:name_amount": 0.918918918918919,
         "bank:order_ref": 1.0,
         "bank:payout_batch": 1.0,
         "bank:split": 0.0,

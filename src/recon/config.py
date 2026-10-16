@@ -113,6 +113,9 @@ class Channel:
     marketplace  order ──channel order no──▶ settlement line ──payout id──▶ bank credit.
                  `settlement` names the settlement report feed; `fee_bps` is the channel's total
                  fee on a line's gross (None: fees are not checked).
+    COD          `cod_remittances`: the channel's COD orders are paid by carrier remittances,
+                 order ──order ref──▶ shipment ──remittance id──▶ bank credit (any chain; False:
+                 each COD order is paid by a credit of its own).
 
     `amount_tolerance` (None: the policy's) applies to the channel's line checks and batch tie-out.
     """
@@ -122,6 +125,7 @@ class Channel:
     settlement: str | None = None
     fee_bps: int | None = None
     amount_tolerance: float | None = None
+    cod_remittances: bool = False
 
     def __post_init__(self) -> None:
         if self.chain not in CHAINS:
@@ -184,6 +188,11 @@ class RunConfig:
     def marketplaces(self) -> dict[str, Channel]:
         """The channels on the marketplace chain, by OMS channel value."""
         return {name: c for name, c in self.channels.items() if c.chain == MARKETPLACE}
+
+    @property
+    def cod_channels(self) -> tuple[str, ...]:
+        """The channels whose COD orders are paid by carrier remittances, by OMS channel value."""
+        return tuple(name for name, c in self.channels.items() if c.cod_remittances)
 
     @property
     def order_ref_patterns(self) -> tuple[str, ...]:

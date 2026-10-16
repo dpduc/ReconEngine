@@ -87,7 +87,14 @@ def _refund(frame: pd.DataFrame) -> pd.Series:
 @dataclass(frozen=True)
 class Settlements:
     batches: pd.DataFrame  # one row per (settlement feed, payout id): BATCH_COLUMNS plus bank_pos
-    credit_rows: frozenset[int]  # bank source rows naming a payout of any report
+    credit_rows: frozenset[int]  # bank source rows naming any of the batches
+
+    # `|` joins payouts and remittances (funnel.remittance: feed "logistics", the carrier as `channel`).
+
+    def __or__(self, other: Settlements) -> Settlements:
+        frames = [b for b in (self.batches, other.batches) if len(b)]
+        return Settlements(pd.concat(frames, ignore_index=True) if frames else self.batches,
+                           self.credit_rows | other.credit_rows)
 
 
 def settle_batches(feeds: dict[str, pd.DataFrame], marketplaces: dict[str, Channel], policy: Policy) -> Settlements:
@@ -101,43 +108,53 @@ def settle_batches(feeds: dict[str, pd.DataFrame], marketplaces: dict[str, Chann
         by_payout = credits.groupby("payout_id")["bank_pos"].agg(list)
         tolerance = channel.tolerance(policy)
         for payout_id, group in lines.groupby("payout_id", sort=True):
-            net = float(group["net"].fillna(0).sum())
-            positions = by_payout.get(payout_id, [])
-            credit = bank.loc[positions[0]] if len(positions) == 1 else None
-            delta = float(credit["credit_amount"]) - net if credit is not None else None
-            if len(positions) > 1:
-                reason = CREDIT_AMBIGUOUS
-            elif credit is None:
-                reason = TIE_OUT if net <= tolerance else "MISSING_PAYMENT"
-            else:
-                reason = TIE_OUT if abs(delta) <= tolerance + 1e-9 else BATCH_MISMATCH
-            row = {"settlement_feed": feed, "channel": channel_name, "payout_id": payout_id, "lines": len(group),
-                   "gross": float(group["gross"].fillna(0).sum()), "fees": float(group["_fees"].sum()),
-                   "refund": float(group["_refund"].sum()), "net": net,
-                   "txn_ref": credit["txn_ref"] if credit is not None else None,
-                   "bank_source_row": int(credit[SOURCE_ROW]) if credit is not None else None,
-                   "credit_amount": float(credit["credit_amount"]) if credit is not None else None,
-                   "tie_out_delta": delta, "decision": BATCH_DECISIONS[reason], "reason_codes": reason,
-                   "bank_pos": positions[0] if credit is not None else None}
-            rows.append({**row, "explanation": _batch_sentence(row, len(positions))})
-    batches = pd.DataFrame(rows, columns=[*BATCH_COLUMNS, "bank_pos"])
-    return Settlements(batches, frozenset(credit_rows))
+            rows.append(tie_out(bank, by_payout.get(payout_id, []), tolerance, settlement_feed=feed,
+                                channel=channel_name, payout_id=payout_id, lines=len(group),
+                                gross=float(group["gross"].fillna(0).sum()), fees=float(group["_fees"].sum()),
+                                refund=float(group["_refund"].sum()), net=float(group["net"].fillna(0).sum())))
+    return Settlements(batch_frame(rows), frozenset(credit_rows))
 
 
-def _batch_sentence(row: dict, credits: int) -> str:
-    payout, lines, net = row["payout_id"], row["lines"], row["net"]
+def batch_frame(rows: list[dict]) -> pd.DataFrame:
+    return pd.DataFrame(rows, columns=[*BATCH_COLUMNS, "bank_pos"])
+
+
+def tie_out(bank: pd.DataFrame, positions: list[int], tolerance: float, *, kind: str = "Payout",
+            **batch) -> dict:
+    """One batch row: `batch` (its feed, channel, payout_id, lines, gross, fees, refund and net) tied out
+    against the bank credits at `positions` (the rows naming it)."""
+    net = batch["net"]
+    credit = bank.loc[positions[0]] if len(positions) == 1 else None
+    delta = float(credit["credit_amount"]) - net if credit is not None else None
+    if len(positions) > 1:
+        reason = CREDIT_AMBIGUOUS
+    elif credit is None:
+        reason = TIE_OUT if net <= tolerance else "MISSING_PAYMENT"
+    else:
+        reason = TIE_OUT if abs(delta) <= tolerance + 1e-9 else BATCH_MISMATCH
+    row = {**batch, "txn_ref": credit["txn_ref"] if credit is not None else None,
+           "bank_source_row": int(credit[SOURCE_ROW]) if credit is not None else None,
+           "credit_amount": float(credit["credit_amount"]) if credit is not None else None,
+           "tie_out_delta": delta, "decision": BATCH_DECISIONS[reason], "reason_codes": reason,
+           "bank_pos": positions[0] if credit is not None else None}
+    return {**row, "explanation": _batch_sentence(row, len(positions), kind)}
+
+
+def _batch_sentence(row: dict, credits: int, kind: str) -> str:
+    batch, named = f"{kind} {row['payout_id']}", f"{kind.lower()} {row['payout_id']}"
+    lines, net = row["lines"], row["net"]
     reason = row["reason_codes"]
     if reason == CREDIT_AMBIGUOUS:
-        return f"Payout {payout} is named by {credits} bank credits; a reviewer picks the one that pays it."
+        return f"{batch} is named by {credits} bank credits; a reviewer picks the one that pays it."
     if reason == "MISSING_PAYMENT":
-        return f"No bank credit names payout {payout} ({lines} lines, net {net:,.2f})."
+        return f"No bank credit names {named} ({lines} lines, net {net:,.2f})."
     if row["txn_ref"] is None:
-        return f"Payout {payout} nets {net:,.2f} over {lines} lines: nothing to pay."
+        return f"{batch} nets {net:,.2f} over {lines} lines: nothing to pay."
     if reason == TIE_OUT:
-        return f"Bank credit {row['txn_ref']} equals the net of payout {payout}'s {lines} lines."
+        return f"Bank credit {row['txn_ref']} equals the net of {named}'s {lines} lines."
     delta = row["tie_out_delta"]
     return (f"Bank credit {row['txn_ref']} is {abs(delta):,.2f} {'more' if delta > 0 else 'less'} than the net "
-            f"of payout {payout}'s {lines} lines ({net:,.2f}); every order in it is reviewed.")
+            f"of {named}'s {lines} lines ({net:,.2f}); every order in it is reviewed.")
 
 
 def _lines(ctx: FunnelContext, feed: str) -> pd.DataFrame:
@@ -159,6 +176,7 @@ def _measure(units: pd.DataFrame, channel: Channel, ctx: FunnelContext) -> pd.Da
     out["settlement_feed"] = feed
     batches = ctx.batches[ctx.batches["settlement_feed"].eq(feed)].set_index("payout_id")
     payout = out[f"{PREFIX}payout_id"]
+    out["batch_kind"], out["batch_feed"], out["batch_id"] = "payout", feed, payout
     out["batch_reason"] = payout.map(batches["reason_codes"])
     out["batch_tie_out_delta"] = payout.map(batches["tie_out_delta"])
     out["batch_bank_pos"] = payout.map(batches["bank_pos"])
@@ -217,14 +235,15 @@ def settle_marketplace(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
 
 
 def batch_results(batches: pd.DataFrame, results: pd.DataFrame) -> pd.DataFrame:
-    """The batches as exported: BATCH_COLUMNS, plus how many of their lines are orders of this run and
-    which of those orders are exceptions on their own line."""
+    """The batches as exported: BATCH_COLUMNS, plus how many orders of this run each pays and which of
+    those orders are exceptions on their own line."""
     columns = [*BATCH_COLUMNS, "orders", "exception_orders"]
-    if batches.empty or "settlement_payout_id" not in results:
+    if batches.empty or "batch_id" not in results:
         return batches.drop(columns="bank_pos").assign(orders=0, exception_orders="").reindex(columns=columns)
-    linked = results[results["settlement_payout_id"].notna()]
+    linked = results.loc[results["batch_id"].notna(), ["batch_feed", "batch_id", "order_id", "decision"]]
     keys = ["settlement_feed", "payout_id"]
-    per_batch = linked.rename(columns={"settlement_payout_id": "payout_id"}).groupby(keys).agg(
+    linked = linked.rename(columns={"batch_feed": "settlement_feed", "batch_id": "payout_id"})
+    per_batch = linked.groupby(keys).agg(
         orders=("order_id", "size"),
         exception_orders=("order_id", lambda ids: "|".join(
             ids[linked.loc[ids.index, "decision"].eq(EXCEPTION)].astype(str))))

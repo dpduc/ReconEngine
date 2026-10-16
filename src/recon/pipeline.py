@@ -30,6 +30,7 @@ from recon.funnel import RULE_VERSION, STEPS, FunnelContext, build_units, run_fu
 from recon.funnel.fx import read_rate_table
 from recon.guidance import Guidance, guide
 from recon.funnel.orphans import orphan_counts, reverse_pass
+from recon.funnel.remittance import remit_batches, remittance_links
 from recon.funnel.settlement import batch_results, settle_batches
 from recon.health import (
     ACKNOWLEDGE,
@@ -165,15 +166,19 @@ def _run(sources: Sources, config: RunConfig, meter: RunMeter) -> ReconRun:
     rate_table = read_source(sources, policy.fx.rate_table) if policy.fx and policy.fx.rate_table else None
     with timer.stage("settlement_batches"):
         settlements = settle_batches(prepared.feeds, config.marketplaces, policy)
+        if config.cod_channels:
+            settlements |= remit_batches(prepared.feeds, policy)
     ctx = FunnelContext(feeds=prepared.feeds, policy=policy, order_ref_patterns=config.order_ref_patterns,
                         date_formats={feed: config.date_format(feed) for feed in config.feeds},
                         fx_rates=read_rate_table(rate_table) if rate_table is not None else None,
-                        marketplaces=config.marketplaces, batches=settlements.batches,
+                        marketplaces=config.marketplaces, cod_channels=config.cod_channels,
+                        batches=settlements.batches,
                         payout_credit_rows=settlements.credit_rows)
     with timer.stage("build_units"):
         units = build_units(prepared.feeds)
     results, funnel_counts = run_funnel(units, STEPS, ctx, timer)
     batches = batch_results(settlements.batches, results)
+    results = remittance_links(results, settlements.batches)
     with timer.stage("reverse_pass"):
         orphans, reverse_counts = reverse_pass(results, prepared.feeds, settlements.credit_rows)
     funnel_counts = pd.concat([funnel_counts, pd.DataFrame([reverse_counts])], ignore_index=True)

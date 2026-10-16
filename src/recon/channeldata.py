@@ -42,7 +42,7 @@ import pandas as pd
 
 from recon.contracts import fee as vnd_fee
 
-GENERATOR_VERSION = "2.4.0"
+GENERATOR_VERSION = "2.5.0"
 SOURCE_FILES = ("olist_orders_dataset.csv", "olist_order_items_dataset.csv", "olist_order_payments_dataset.csv")
 DATE_SHIFT = pd.Timedelta(days=2926)  # 418 weeks: weekdays kept, Black Friday 2017 -> Black Friday 2025
 DATE_COLUMNS = ("order_purchase_timestamp", "order_approved_at", "order_delivered_carrier_date",
@@ -855,6 +855,8 @@ class Market:
     # marketplace -> its settlement report feed in the set's config: file, date format, column mapping
     # and the channel's terms (fee_bps, amount_tolerance)
     reports: dict[str, dict[str, Any]] = field(default_factory=dict)
+    # channels whose COD comes back in carrier remittances that the bank credit names
+    cod_remittances: tuple[str, ...] = ()
 
 
 TIKTOK_REPORT = {"path": "tiktok_settlement.csv", "date_format": "%Y/%m/%d %H:%M:%S",
@@ -888,7 +890,8 @@ MARKETS = {
                   "tiktok": {**TIKTOK_REPORT,
                              "terms": {"fee_bps": round((VietnamAssumptions.tiktok_commission
                                                          + VietnamAssumptions.tiktok_transaction_fee) * 10_000),
-                                       "amount_tolerance": 1}}}),
+                                       "amount_tolerance": 1}}},
+                 cod_remittances=("website", "facebook")),
     "br": Market("br", "BRL", _BrazilSeller, BrazilAssumptions(), BR_PROFILES,
                  {"mdr_bps": round(BrazilAssumptions.card_mdr * 10_000),
                   "cod_fee_bps": round(BrazilAssumptions.courier_cod_fee * 10_000), "amount_tolerance": 0.01,
@@ -993,6 +996,8 @@ def config_for(market: Market) -> dict[str, Any]:
                        "date_format": report["date_format"], "role": "settlement"}
     channels = {name: {"chain": "marketplace", "settlement": name, **market.reports[name]["terms"]}
                 if name in market.reports else {} for name in CHANNELS}
+    for name in market.cod_remittances:
+        channels[name]["cod_remittances"] = True
     return {
         "feeds": feeds,
         "channels": channels,
@@ -1002,7 +1007,7 @@ def config_for(market: Market) -> dict[str, Any]:
             "bank": {c: c for c in ("txn_ref", "description", "credit_amount", "fee_amount", "net_amount",
                                     "value_date")},
             "logistics": {c: c for c in ("tracking_code", "client_order_code", "cod_collected", "ship_fee",
-                                         "cod_fee")},
+                                         "cod_fee", "remittance_id", "status")},
             **{name: report["mapping"] for name, report in market.reports.items()},
         },
         "policy": {**market.policy,

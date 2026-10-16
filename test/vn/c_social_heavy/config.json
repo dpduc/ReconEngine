@@ -34,7 +34,9 @@
     }
   },
   "channels": {
-    "website": {},
+    "website": {
+      "cod_remittances": true
+    },
     "shopee": {
       "chain": "marketplace",
       "settlement": "shopee",
@@ -47,7 +49,9 @@
       "fee_bps": 1000,
       "amount_tolerance": 1
     },
-    "facebook": {}
+    "facebook": {
+      "cod_remittances": true
+    }
   },
   "mapping": {
     "oms": {
@@ -74,7 +78,9 @@
       "client_order_code": "client_order_code",
       "cod_collected": "cod_collected",
       "ship_fee": "ship_fee",
-      "cod_fee": "cod_fee"
+      "cod_fee": "cod_fee",
+      "remittance_id": "remittance_id",
+      "status": "status"
     },
     "shopee": {
       "order_no": "M\u00e3 \u0111\u01a1n h\u00e0ng",

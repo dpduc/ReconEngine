@@ -1,6 +1,7 @@
 """The reconciliation funnel. ``STEPS`` is the ordered step list; add steps by inserting here.
 
-Order: eligibility (source evidence, status policy) -> marketplace chain -> linking -> rule checks -> decision.
+Order: eligibility (source evidence, status policy) -> marketplace and COD remittance chains -> linking
+-> rule checks -> decision.
 """
 
 from recon.funnel.base import (
@@ -16,6 +17,7 @@ from recon.funnel.base import (
 from recon.funnel.decision import decision
 from recon.funnel.eligibility import missing_source_evidence, status_policy
 from recon.funnel.linking import link_candidates, link_constrained, link_exact
+from recon.funnel.remittance import settle_cod
 from recon.funnel.routing import route_review
 from recon.funnel.rules import RULE_STEPS
 from recon.funnel.settlement import settle_marketplace
@@ -24,6 +26,7 @@ STEPS: list[FunnelStep] = [
     FunnelStep("missing_source_evidence", missing_source_evidence),
     FunnelStep("status_policy", status_policy),
     FunnelStep("settle_marketplace", settle_marketplace),
+    FunnelStep("settle_cod", settle_cod),
     FunnelStep("link_exact", link_exact),
     FunnelStep("link_constrained", link_constrained),
     FunnelStep("link_candidates", link_candidates),
@@ -38,6 +41,7 @@ STEP_GROUPS: dict[str, str] = {
     "missing_source_evidence": POLICY_ROUTING,
     "status_policy": POLICY_ROUTING,
     "settle_marketplace": LINKING,
+    "settle_cod": LINKING,
     "link_exact": LINKING,
     "link_constrained": LINKING,
     "link_candidates": LINKING,

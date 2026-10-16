@@ -21,7 +21,7 @@ def attach_truth(results: pd.DataFrame, truth: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-CLEAN_CODES = {"THREE_WAY_TIE_OUT", "SETTLEMENT_TIE_OUT"}  # reason codes that describe a match, not a problem
+CLEAN_CODES = {"THREE_WAY_TIE_OUT", "SETTLEMENT_TIE_OUT", "REMITTANCE_TIE_OUT"}  # reason codes that describe a match, not a problem
 
 
 def _codes(value: Any) -> set[str]:
@@ -91,6 +91,10 @@ def _predicted_links(results: pd.DataFrame) -> pd.DataFrame:
             linked = results[results[key].notna()]
             frames.append(pd.DataFrame({"feed": feed, "record_key": linked[key].astype(str),
                                         "order_id": linked["order_id"].astype(str), "link_pass": linked[link_pass]}))
+    if "remittance_txn_ref" in results:  # the remittance a unit's shipment is on, when not its own credit
+        linked = results[results["remittance_txn_ref"].notna() & results["remittance_txn_ref"].ne(results["txn_ref"])]
+        frames.append(pd.DataFrame({"feed": "bank", "record_key": linked["remittance_txn_ref"].astype(str),
+                                    "order_id": linked["order_id"].astype(str), "link_pass": "remittance"}))
     return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["feed", "record_key", "order_id",
                                                                                       "link_pass"])
 

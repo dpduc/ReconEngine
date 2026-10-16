@@ -1,7 +1,8 @@
 """Warning check: records on one side with no counterpart on the other, by exact order reference.
 
-Marketplace orders are paid through their settlement report, not by a credit naming them, so they
-are not missing a bank record; a bank credit naming a payout of a report is not missing an order.
+Marketplace orders are paid through their settlement report, and COD orders of a remittance channel
+through their carrier's remittance, not by a credit naming them, so they are not missing a bank
+record; a bank credit naming a payout or a remittance is not missing an order.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from recon.config import RunConfig
 from recon.funnel.linking import bank_order_refs
 from recon.health import Issue
 from recon.funnel.settlement import payout_credits
-from recon.schema import CHANNEL, ORDER_REF_COLUMNS, PAYOUT_ID
+from recon.schema import CHANNEL, ORDER_REF_COLUMNS, PAYOUT_ID, REMITTANCE_ID
 
 
 def _order_refs(feeds: dict[str, pd.DataFrame], config: RunConfig) -> dict[str, pd.Series]:
@@ -36,13 +37,19 @@ def coverage(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Issue]:
     if "oms" not in refs:
         return []
     orders = set(refs["oms"].dropna())
-    oms, paid_elsewhere, payouts = feeds["oms"], pd.Series(False, index=refs["oms"].index), set()
-    if config.marketplaces and CHANNEL in oms.columns:
-        paid_elsewhere = oms[CHANNEL].fillna("").astype(str).str.strip().isin(list(config.marketplaces))
+    oms, paid_elsewhere, ids, payouts = feeds["oms"], pd.Series(False, index=refs["oms"].index), set(), set()
+    channels = oms[CHANNEL].fillna("").astype(str).str.strip() if CHANNEL in oms.columns else None
+    if config.marketplaces and channels is not None:
+        paid_elsewhere = channels.isin(list(config.marketplaces))
         reports = [feeds[c.settlement] for c in config.marketplaces.values() if c.settlement in feeds]
         ids = {i for frame in reports if PAYOUT_ID in frame.columns for i in frame[PAYOUT_ID].dropna()}
-        if "bank" in refs and "description" in feeds["bank"].columns:
-            payouts = set(payout_credits(feeds["bank"], ids)["bank_pos"])
+    if config.cod_channels and channels is not None and "payment_method" in oms.columns:
+        paid_elsewhere = paid_elsewhere | (channels.isin(list(config.cod_channels)) & oms["payment_method"].eq("COD"))
+        shipments = feeds.get("logistics")
+        if shipments is not None and REMITTANCE_ID in shipments.columns:
+            ids |= set(shipments[REMITTANCE_ID].dropna().astype(str))
+    if ids and "bank" in refs and "description" in feeds["bank"].columns:
+        payouts = set(payout_credits(feeds["bank"], ids)["bank_pos"])
     issues = []
     for feed, gap in (("bank", "no_payment"), ("logistics", "no_shipment")):
         if feed not in refs:
