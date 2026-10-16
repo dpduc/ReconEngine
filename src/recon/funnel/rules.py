@@ -10,8 +10,9 @@ from typing import Callable
 
 import pandas as pd
 
-from recon.contracts import fee
-from recon.funnel.base import FunnelContext, FunnelStep, StepOutcome, cod_remittance, decide, split
+from recon.contracts import currency_fee
+from recon.funnel.base import (FunnelContext, FunnelStep, StepOutcome, cod_remittance, decide, fee_currency,
+                               split)
 from recon.funnel.fx import lookup_rates
 from recon.funnel.linking import SPLIT_AMOUNTS
 from recon.funnel.periods import missing_payment, missing_shipment
@@ -42,8 +43,10 @@ def _measure(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     out["credit_delta"] = out["credit_amount"].fillna(0) - out["expected_credit"]
     out["fee_bps"] = _fee_bps(out, ctx)
     prepaid_credit = out["credit_amount"].fillna(0).where(out["payment_method"].eq("PREPAID"), 0)
-    out["expected_mdr"] = [fee(int(x), bps) for x, bps in zip(prepaid_credit, out["fee_bps"])]
-    out["expected_cod_fee"] = out["cod_collected"].fillna(0).map(lambda x: fee(int(x), policy.cod_fee_bps))
+    currency = fee_currency(out)
+    out["expected_mdr"] = [currency_fee(x, bps, c) for x, bps, c in zip(prepaid_credit, out["fee_bps"], currency)]
+    out["expected_cod_fee"] = [currency_fee(x, policy.cod_fee_bps, c)
+                               for x, c in zip(out["cod_collected"].fillna(0), currency)]
     out["fee_delta"] = out["fee_amount"].fillna(0) - out["expected_mdr"]
     out["cod_fee_delta"] = out["cod_fee"].fillna(0) - out["expected_cod_fee"]
     out["amount_within_tolerance"] = (within(out["credit_delta"], policy.amount_tolerance)) & (

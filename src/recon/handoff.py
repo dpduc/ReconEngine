@@ -49,6 +49,10 @@ RECOMMENDED_ACTIONS: dict[str, tuple[str, str]] = {
     "TIMING_MISMATCH": (CONFIRM, "confirm the event dates with the 3PL"),
     "LINK_CANDIDATES": (OVERRIDE, "pick the right credit among the candidates"),
     "POSSIBLE_INSTALLMENT_INTEREST": (CONFIRM, "confirm the delta is installment interest with the PSP"),
+    "DUPLICATE_PAYMENT": (MARK_REFUND, "one credit alone pays it; refund the other or apply it elsewhere"),
+    "SETTLEMENT_BATCH_MISMATCH": (CONFIRM, "confirm the payout's difference with the platform or carrier"),
+    "PAYOUT_CREDIT_AMBIGUOUS": (OVERRIDE, "pick the bank credit that is the payout"),
+    "SETTLEMENT_REPORT_MISSING": (OVERRIDE, "load the channel's settlement report, or pick the payout that pays it"),
     "ORPHAN_PAYMENT": (OVERRIDE, "match it to the order it pays; mark as refund if it pays none"),
     "ORPHAN_SHIPMENT": (OVERRIDE, "match it to the order it ships"),
 }

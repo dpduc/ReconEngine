@@ -178,6 +178,8 @@ A feed may mix currencies. Each linked order and credit are compared in their ow
 
 Each converted unit records the rate, its source and its date in its results and explanation, and keeps the original amounts. The manifest records the FX setting and the rate table's hash.
 
+Expected fees are computed in the currency's minor unit, rounded half-up: R$ 99.90 at 399 bps is 3.99, and VND (no minor unit) is rounded to whole đồng. A currency not in the table has two decimals; a run whose feeds carry no currency counts in whole units.
+
 ## The funnel
 
 Each step only sees the units that earlier steps left undecided. Eligibility

@@ -99,3 +99,18 @@ def test_excluding_is_still_offered_as_a_last_resort(tmp_path):
     issue = mismatch_issue(inspect(tmp_path, config))
 
     assert [o.id for o in issue.fix_options][-2:] == ["exclude_rows", "acknowledge"]
+
+
+def test_fees_are_computed_in_the_currency_minor_unit(tmp_path):
+    oms = OMS.replace("100.00,2024", "99.90,2024").replace(",55.00,2024-01-02T10:00:00,delivered,USD",
+                                                           ",430000,2024-01-02T10:00:00,delivered,VND")
+    bank = BANK.replace("P1,PAYMENT ORD2024-0000001,BRL,100.00,0,100.00", "P1,PAYMENT ORD2024-0000001,BRL,99.90,3.99,95.91") \
+        .replace("P2,PAYMENT ORD2024-0000002,USD,55.00,0,55.00", "P2,PAYMENT ORD2024-0000002,VND,430000,17157,412843")
+    config = replace(write_sources(tmp_path, oms=oms, bank=bank, ship=SHIP), resolutions=())
+    config = replace(config, policy=replace(config.policy, mdr_bps=399))
+
+    units = by_order(run(tmp_path, acknowledged(tmp_path, config)))
+
+    assert units.loc["ORD2024-0000001", "expected_mdr"] == 3.99  # not 4, from the truncated 99
+    assert units.loc["ORD2024-0000002", "expected_mdr"] == 17_157  # VND has no minor unit
+    assert set(units["decision"]) == {"AUTO_ACCEPT"}

@@ -25,8 +25,8 @@ from typing import Any
 import pandas as pd
 
 from recon.config import PAYMENT, Channel
-from recon.contracts import fee
-from recon.funnel.base import FunnelContext, StepOutcome, decide, pass_on, split
+from recon.contracts import currency_fee
+from recon.funnel.base import FunnelContext, StepOutcome, decide, fee_currency, pass_on, split
 from recon.funnel.decision import TIE_OUT_CONFIDENCE
 from recon.funnel.linking import CANDIDATE_MAX_SCORE, attach_exact
 from recon.funnel.periods import missing_payment
@@ -59,7 +59,9 @@ def expected_net(orders: pd.DataFrame, channel: Channel) -> pd.Series:
         gross = orders[ITEM_TOTAL].where(orders[ITEM_TOTAL].notna(), gross)
     if channel.fee_bps is None:
         return pd.Series(float("nan"), index=orders.index)
-    return gross - gross.map(lambda g: fee(int(round(g)), channel.fee_bps) if pd.notna(g) else float("nan"))
+    fees = [currency_fee(g, channel.fee_bps, c) if pd.notna(g) else float("nan")
+            for g, c in zip(gross, fee_currency(orders))]
+    return gross - pd.Series(fees, index=orders.index, dtype=float)
 
 
 def find_sets(items: list[tuple[str, float]], target: float, tolerance: float) -> tuple[list[list[str]], str]:

@@ -25,8 +25,8 @@ from __future__ import annotations
 import pandas as pd
 
 from recon.config import Policy
-from recon.contracts import fee
-from recon.funnel.base import FunnelContext, StepOutcome, cod_remittance, decide, pass_on, split
+from recon.contracts import currency_fee
+from recon.funnel.base import FunnelContext, StepOutcome, cod_remittance, decide, fee_currency, pass_on, split
 from recon.funnel.decision import TIE_OUT_CONFIDENCE
 from recon.funnel.linking import attach_bank, attach_exact, bank_frame
 from recon.funnel.periods import missing_payment, missing_shipment
@@ -94,7 +94,7 @@ def _measure(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     out["batch_bank_pos"] = out["batch_id"].map(batches["bank_pos"])
     collected = out["cod_collected"].fillna(0)
     out["cod_amount_delta"] = collected - out["order_amount"].fillna(0)
-    out["expected_cod_fee"] = collected.map(lambda x: fee(int(x), ctx.policy.cod_fee_bps))
+    out["expected_cod_fee"] = [currency_fee(x, ctx.policy.cod_fee_bps, c) for x, c in zip(collected, fee_currency(out))]
     out["cod_fee_delta"] = out["cod_fee"].fillna(0) - out["expected_cod_fee"]
     return out
 
