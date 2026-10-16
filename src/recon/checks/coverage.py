@@ -11,7 +11,7 @@ from recon.health import Issue
 from recon.schema import ORDER_REF_COLUMNS
 
 
-def _order_refs(feeds: dict[str, pd.DataFrame]) -> dict[str, pd.Series]:
+def _order_refs(feeds: dict[str, pd.DataFrame], config: RunConfig) -> dict[str, pd.Series]:
     """Order reference per row of each feed that carries one, as linking reads it."""
     refs = {}
     for feed, column in ORDER_REF_COLUMNS.items():
@@ -19,7 +19,7 @@ def _order_refs(feeds: dict[str, pd.DataFrame]) -> dict[str, pd.Series]:
         if frame is None:
             continue
         if feed == "bank" and ({column, "description"} & set(frame.columns)):
-            refs[feed] = bank_order_refs(frame)
+            refs[feed] = bank_order_refs(frame, config.order_ref_patterns)
         elif column in frame.columns:
             refs[feed] = frame[column]
     return refs
@@ -27,7 +27,7 @@ def _order_refs(feeds: dict[str, pd.DataFrame]) -> dict[str, pd.Series]:
 
 @register
 def coverage(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Issue]:
-    refs = _order_refs(feeds)
+    refs = _order_refs(feeds, config)
     if "oms" not in refs:
         return []
     orders = set(refs["oms"].dropna())

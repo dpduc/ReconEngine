@@ -20,16 +20,28 @@ CANDIDATE_MAX_SCORE = 0.5  # pass 3 scores stay well below any accept threshold
 CANDIDATE_ROWS = "bank_candidate_rows"  # '|'-joined bank source rows listed as pass 3 candidates
 
 
-def extract_order_ref(description: Any) -> str | None:
-    match = ORDER_REF.search(str(description))
-    return match.group(1) if match else None
+def _reference(match: re.Match) -> str:
+    """A pattern's order reference: its named group `ref`, else its first group, else the whole match."""
+    if "ref" in match.re.groupindex:
+        return match.group("ref")
+    return match.group(1) if match.re.groups else match.group(0)
 
 
-def bank_order_refs(bank: pd.DataFrame) -> pd.Series:
+def extract_order_ref(description: Any, patterns: tuple[str, ...] = ()) -> str | None:
+    """The first order reference found by the chains' `patterns`, in order, then by the default ORDER_REF."""
+    text = str(description)
+    for pattern in (*(re.compile(p) for p in patterns), ORDER_REF):
+        match = pattern.search(text)
+        if match:
+            return _reference(match)
+    return None
+
+
+def bank_order_refs(bank: pd.DataFrame, patterns: tuple[str, ...] = ()) -> pd.Series:
     """The structured `order_ref` column when mapped, otherwise the reference extracted from the description."""
     if ORDER_REF_COLUMNS["bank"] in bank.columns:
         return bank[ORDER_REF_COLUMNS["bank"]]
-    return bank["description"].map(extract_order_ref)
+    return bank["description"].map(lambda description: extract_order_ref(description, patterns))
 
 
 def _link_one_to_one(units: pd.DataFrame, all_keys: pd.Series, other: pd.DataFrame, unit_key: str,
@@ -68,7 +80,7 @@ def link_exact(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
 
 def _bank_frame(ctx: FunnelContext) -> pd.DataFrame:
     bank = lineage_prefixed(ctx.feeds["bank"], "bank")
-    bank[ORDER_REF_COLUMNS["bank"]] = bank_order_refs(bank)
+    bank[ORDER_REF_COLUMNS["bank"]] = bank_order_refs(bank, ctx.order_ref_patterns)
     return bank
 
 

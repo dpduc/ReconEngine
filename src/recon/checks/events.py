@@ -41,7 +41,7 @@ def placeholder_timestamp(feeds: dict[str, pd.DataFrame], config: RunConfig) -> 
     """A column, or a status segment of it, whose every timestamp sits at 00:00:00."""
     issues = []
     for feed, frame in feeds.items():
-        for column in TIMESTAMP_COLUMNS.get(feed, ()):
+        for column in TIMESTAMP_COLUMNS.get(config.kind(feed), ()):
             if column not in frame.columns:
                 continue
             stamps = _timestamps(frame[column], config, feed)

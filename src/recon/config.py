@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from recon.health import CONVERT_CURRENCY, SET_STATUS_POLICY
+from recon.schema import DEFAULT_ROLES, FEEDS, ROLES, SETTLEMENT
 
 # Evidence an order status can require before its unit ties out.
 PAYMENT, SHIPMENT = "payment", "shipment"
@@ -79,13 +80,46 @@ class Policy:
 
 @dataclass(frozen=True)
 class FeedSpec:
-    """Where one feed lives. `path` is free-form, relative to the sources folder."""
+    """Where one feed lives. `path` is free-form, relative to the sources folder.
+
+    `role` is one of ROLES (orders, bank, logistics, settlement); a feed named oms, bank or
+    logistics has that role, so only a settlement report needs to state it.
+    """
 
     path: str
     format: str = "csv"
     encoding: str = "utf-8"
     date_format: str | None = None
     delimiter: str | None = None  # CSV only; None = detect from the header line
+    role: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.role is not None and self.role not in ROLES:
+            raise ValueError(f"unknown feed role {self.role!r}; expected one of {', '.join(ROLES)}")
+
+
+# Money chains (ADR 0001): how a channel's money reaches the bank.
+PREPAID = "prepaid"
+CHAINS = (PREPAID,)
+
+
+@dataclass(frozen=True)
+class Channel:
+    """One sales channel (an OMS `channel` value) and its money chain.
+
+    prepaid  order ──order ref──▶ bank credit. `order_ref_pattern` finds the order in a bank
+             description: its named group `ref`, else its first group, else the whole match.
+             None: the default pattern.
+    """
+
+    chain: str = PREPAID
+    order_ref_pattern: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.chain not in CHAINS:
+            raise ValueError(f"unknown money chain {self.chain!r}; expected one of {', '.join(CHAINS)}")
+        if self.order_ref_pattern is not None:
+            re.compile(self.order_ref_pattern)
 
 
 @dataclass(frozen=True)
@@ -106,6 +140,34 @@ class RunConfig:
     resolutions: tuple[Resolution, ...] = ()
     ground_truth: str | None = None  # optional truth CSV, relative to the sources folder
     link_truth: str | None = None  # optional true links CSV (feed, record_key, order_id[, link_kind])
+    # OMS `channel` value -> its channel. None declared: every order is on one default prepaid chain.
+    channels: dict[str, Channel] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        for name, spec in self.feeds.items():
+            if name in FEEDS:
+                if spec.role not in (None, DEFAULT_ROLES[name]):
+                    raise ValueError(f"feed {name!r} has the {DEFAULT_ROLES[name]} role, not {spec.role!r}")
+            elif spec.role != SETTLEMENT:
+                raise ValueError(f"feed {name!r} needs a role: the orders, bank and logistics feeds are named "
+                                 f"{', '.join(FEEDS)}; any other feed is a settlement report (role "
+                                 f"{SETTLEMENT!r})")
+
+    def role(self, feed: str) -> str | None:
+        """The feed's role: implied by its name (oms, bank, logistics), else as its spec states."""
+        spec = self.feeds.get(feed)
+        return DEFAULT_ROLES.get(feed) or (spec.role if spec else None)
+
+    def kind(self, feed: str) -> str | None:
+        """The schema kind of the feed's role (see ``schema.ROLES``): the key of every schema table."""
+        role = self.role(feed)
+        return ROLES[role] if role else None
+
+    @property
+    def order_ref_patterns(self) -> tuple[str, ...]:
+        """The prepaid chains' own patterns for an order reference in a bank description, deduplicated."""
+        own = [c.order_ref_pattern for c in self.channels.values() if c.chain == PREPAID and c.order_ref_pattern]
+        return tuple(dict.fromkeys(own))
 
     @property
     def resolved_policy(self) -> Policy:
@@ -140,6 +202,7 @@ class RunConfig:
             resolutions=tuple(Resolution(**r) for r in data.get("resolutions", [])),
             ground_truth=data.get("ground_truth"),
             link_truth=data.get("link_truth"),
+            channels={name: Channel(**spec) for name, spec in data.get("channels", {}).items()},
         )
 
     def to_json(self) -> str:

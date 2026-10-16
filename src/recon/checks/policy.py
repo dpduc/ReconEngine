@@ -1,4 +1,4 @@
-"""Warning checks: OMS order statuses the status policy does not cover, bank payment types without a fee rate."""
+"""Warning checks: what the policy or config does not cover (order statuses, payment types, channels)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ import pandas as pd
 from recon.checks import register, warning
 from recon.config import PAYMENT, SHIPMENT, RunConfig
 from recon.health import SET_STATUS_POLICY, FixOption, Issue
-from recon.schema import ORDER_STATUS, PAYMENT_TYPE
+from recon.schema import CHANNEL, ORDER_STATUS, PAYMENT_TYPE
 
 # Evidence choices offered for an uncovered status, with their labels.
 EVIDENCE_CHOICES = (
@@ -54,4 +54,21 @@ def payment_type_without_fee_rate(feeds: dict[str, pd.DataFrame], config: RunCon
                               bank, mask,
                               f"bank: {int(mask.sum())} credits have payment type '{kind}', which has no fee rate; "
                               f"they are checked at the fallback rate of {policy.mdr_bps} bps"))
+    return issues
+
+
+@register
+def channel_not_configured(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Issue]:
+    """With channels declared, orders of an undeclared channel fall on the default prepaid chain."""
+    oms = feeds.get("oms")
+    if not config.channels or oms is None or CHANNEL not in oms.columns:
+        return []
+    channels = oms[CHANNEL].fillna("").astype(str).str.strip()
+    issues = []
+    for channel in sorted(set(channels) - set(config.channels)):
+        mask = channels.eq(channel)
+        shown = channel or BLANK_STATUS
+        issues.append(warning(f"channel_not_configured:{shown}", "channel_not_configured", "oms", oms, mask,
+                              f"oms: {int(mask.sum())} orders have channel '{shown}', which the config does not "
+                              "declare; they are reconciled on the default prepaid chain"))
     return issues

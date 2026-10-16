@@ -76,7 +76,8 @@ outcome.bundle()         # decisions, triage queue, exception queue, orphans, cl
 
 A run config is a JSON file (or YAML, if PyYAML is installed) with these parts:
 
-- `feeds`: path, format, encoding, date format and delimiter for each feed.
+- `feeds`: path, format, encoding, date format and delimiter for each feed. The feeds named `oms`, `bank` and `logistics` are the orders, bank and logistics feeds. Any other feed is a settlement report and states `"role": "settlement"`. It is loaded and Health-checked (required columns `order_no`, `payout_id`, `gross`, `net`) but not yet reconciled.
+- `channels`: optional. Each OMS `channel` value names its money chain (only `prepaid` so far) and, optionally, the `order_ref_pattern` that finds its orders in a bank description (named group `ref`, e.g. `"DON (?P<ref>#\\d+)"`). Without channels, every order is on one prepaid chain with the default pattern. When channels are declared, orders of an undeclared channel are a Health warning.
 - `mapping`: canonical column → source column, for each feed.
 - `policy`: absolute amount tolerance (default 0.01), date window for linking (default ±4 days), fee rates (`mdr_bps`, overridden per bank `payment_type` by `payment_type_fee_bps`, e.g. `{"bank_transfer": 0, "wallet": 110}`), `payer_pattern` (a regex with a named group `payer` that finds the payer in a bank description, when the bank feed has no `payer_name` column; compared with the OMS `customer_name` in linking pass 2), a `status_policy` that says which order statuses need payment and/or shipment evidence, and an optional `fx` setting (see [Currencies and FX](#currencies-and-fx)).
 - `resolutions`: the fixes and acknowledgements recorded in the Fix step.

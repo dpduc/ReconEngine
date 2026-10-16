@@ -29,6 +29,7 @@ class FunnelContext:
     policy: Policy  # with the run config's resolutions applied
     date_formats: dict[str, str | None] = field(default_factory=dict)  # feed -> declared strftime format
     fx_rates: pd.DataFrame | None = None  # the policy's rate table, read (see funnel.fx)
+    order_ref_patterns: tuple[str, ...] = ()  # the chains' own order-reference patterns (see linking)
 
     def dates(self, feed: str, values: pd.Series, utc: bool = False) -> pd.Series:
         """`values` (a date column of `feed`) parsed as the feed declares."""

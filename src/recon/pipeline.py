@@ -129,7 +129,7 @@ def _prepare(sources: Sources, config: RunConfig, timer: StageTimer | None = Non
     with stage("raw_checks"):
         raw_issues = run_raw_checks(feeds, config)
     with stage("parse_numeric"):
-        feeds = {name: parse_numeric(name, frame) for name, frame in feeds.items()}
+        feeds = {name: parse_numeric(config.kind(name), frame) for name, frame in feeds.items()}
     with stage("checks"):
         issues = run_checks(feeds, config)
     with stage("profiles"):
@@ -162,7 +162,7 @@ def _run(sources: Sources, config: RunConfig, meter: RunMeter) -> ReconRun:
         return ReconRun(status=BLOCKED, health=prepared.report, excluded=prepared.excluded, manifest=manifest)
     policy = config.resolved_policy
     rate_table = read_source(sources, policy.fx.rate_table) if policy.fx and policy.fx.rate_table else None
-    ctx = FunnelContext(feeds=prepared.feeds, policy=policy,
+    ctx = FunnelContext(feeds=prepared.feeds, policy=policy, order_ref_patterns=config.order_ref_patterns,
                         date_formats={feed: config.date_format(feed) for feed in config.feeds},
                         fx_rates=read_rate_table(rate_table) if rate_table is not None else None)
     with timer.stage("build_units"):
