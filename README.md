@@ -37,11 +37,25 @@ streamlit run app.py
 
 `python -m recon.olistdata` keeps every source order by default. Pass `--rows N` for a smaller sample.
 
+## Running a folder from the terminal
+
+A folder with its own `config.json` runs in one command:
+
+```powershell
+python -m recon run test/vn/b_marketplace_heavy --labels test/vn/labels/b_marketplace_heavy --acknowledge "seen"
+```
+
+Health runs first. Blocking issues stop the run, and so do warnings still open without `--acknowledge "<note>"`,
+which accepts every open warning with that note. Either way the issues are listed and the exit code is 1. Otherwise
+the export bundle and `health_report.json` are written to `--out` (`runs/<folder name>` by default), and the decision
+counts, queue, open items and orphans are printed. `--labels` names a folder holding `ground_truth.csv` and/or
+`links.csv`; with it, accuracy and link metrics are printed too. A run never reads labels from the inputs' folder.
+
 ## The wizard
 
 | Step | What happens |
 |---|---|
-| **Load** | Upload the OMS, bank and logistics files (CSV, XLSX or Parquet), or point at a **local folder** and pick a file for each feed. Uploads stay in memory and folder files are read in place, so no copies are written to disk. Local-folder mode only works when the app runs on the machine that holds the folder. The engine suggests a column mapping from column names and value patterns, and flags any suggestion it isn't sure of; nothing is mapped silently. An optional currency column (e.g. `Ccy`) is suggested when its header and values clearly match. A confirmed mapping can be saved as a profile and reused. |
+| **Load** | Upload the OMS, bank and logistics files (CSV, XLSX or Parquet), or point at a **local folder** and pick a file for each feed. A folder with its own `config.json` is loaded by that config as it is (feeds, mapping, channels and policy), skipping the mapping step. Uploads stay in memory and folder files are read in place, so no copies are written to disk. Local-folder mode only works when the app runs on the machine that holds the folder. The engine suggests a column mapping from column names and value patterns, and flags any suggestion it isn't sure of; nothing is mapped silently. An optional currency column (e.g. `Ccy`) is suggested when its header and values clearly match. A confirmed mapping can be saved as a profile and reused. |
 | **Health** | The Health Report groups issues by severity (blocking / warning / info), with affected-row counts, sample rows and profiles. Each issue explains in plain language what was found and what happens to the affected records, and warns when it touches an implausibly large share of a file. It can be downloaded as JSON or as a standalone HTML page, both including this guidance. |
 | **Fix** | Issues are split into **Needs your decision** (blocking issues, uncovered order statuses, currency mismatches) and **Sign-off only** (findings the run already flags as exceptions). Each issue has a recommended option preselected, with the reason. Sign-off issues can be acknowledged together with one note. Each choice is written into the run config and the checks run again. The run config can be downloaded. |
 | **Run** | Available only once the gate is open. Runs the funnel and shows the counts at each step. |
@@ -68,6 +82,8 @@ config = load_config("configs/olist_benchmark.json")
 # sources: a folder, or the files themselves in memory as {relative path: bytes}
 report = inspect("data/generated", config)   # HealthReport: issues, profiles, gate_open
 outcome = run("data/generated", config)      # ReconRun, or a "blocked" run listing the open issues
+# labels: a folder (or in-memory files) with ground_truth.csv and/or links.csv, to score the run
+scored = run("test/vn/c_social_heavy", config, labels="test/vn/labels/c_social_heavy")
 outcome.results          # one row per unit: deciding step, decision, reason codes, deltas, explanation
 outcome.exception_queue  # EXCEPTION + REVIEW units and orphans, ranked
 outcome.close_watchlist # auto-accepted with a note; revisit first if the period won't close
@@ -120,6 +136,8 @@ A run config is a JSON file (or YAML, if PyYAML is installed) with these parts:
 - `open_items`: optional. The previous run's `open_items.csv`; its orders join this run.
 - `ground_truth`: optional. Each order's expected outcome: `PASS_1` / `PASS_2` (auto-accept), `REVIEW`, `EXCEPTION`
   or `OPEN`. Accuracy scores the four decisions, and precision and recall are reported for each reason code.
+  This names a file next to the inputs, as the Olist benchmark keeps it. Labels in a folder of their own come in
+  through `run(..., labels=...)` or `--labels` instead, and are read as `ground_truth.csv` and `links.csv`.
 
 `configs/olist_benchmark.json` is the config for the benchmark, with every warning acknowledged.
 
@@ -279,7 +297,8 @@ then reports:
 
 On the Olist benchmark, all 196,078 links are made in pass 1 and are correct.
 
-The Vietnamese multi-channel sets (`test/vn`) record a baseline in their manifests. Marketplace orders are settled
+The Vietnamese multi-channel sets (`test/vn`) record a baseline in their manifests. Their labels are kept apart, in
+`test/vn/labels/<set>/`, so running a set's folder never reads the answers. Marketplace orders are settled
 through their Shopee and TikTok Shop reports and COD orders through the GHN, GHTK and J&T remittances, so every
 settlement line, payout credit and remittance credit is linked, and split transfers link as a group. Money due
 after the cut-off is OPEN. Every set scores 100% on the four decisions, with an auto-accept precision of 1.0.
@@ -329,11 +348,13 @@ src/recon/
 ├── resolutions.py    # applies resolutions: remap, exclusions, duplicates, dates, status policy
 ├── funnel/           # ordered steps: eligibility, linking, routing, rules, decision, orphans
 ├── results.py        # ReconRun, exception queue, export bundle
+├── cli.py            # python -m recon run <folder>: Health, run, bundle
 ├── handoff.py        # resolution actions, append-only audit log, handoff metrics, close status
 ├── evaluation.py     # ground truth, per-reason-code metrics
 ├── olistdata.py      # builds the Olist benchmark feeds
 ├── perf.py           # runtime and cost harness, writes reports/performance.md
 ├── timing.py         # stage timer and per-run peak memory
+├── channeldata.py    # builds the Vietnamese multi-channel sets (test/vn) and their labels (test/vn/labels)
 └── mockdata.py       # synthetic feed generator
 app.py, app_pages/, recon_app/   # Streamlit wizard over recon.pipeline
 configs/olist_benchmark.json     # benchmark run config

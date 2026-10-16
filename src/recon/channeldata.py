@@ -20,7 +20,8 @@ channel reaches the seller. Two markets share the plumbing:
 The OMS holds the month's orders. The bank statement and the settlement reports run to the 15th
 of the next month, so they carry payouts for last month's orders and miss money not yet released.
 Ground truth is what a correct reconciler with every file concludes, not what the engine does
-today; ``links.csv`` names the true order(s) of every bank line, settlement row and shipment.
+today; ``links.csv`` names the true order(s) of every bank line, settlement row and shipment. Both are
+written to ``<out>/<market>/labels/<set>/``, apart from the inputs, and the set configs do not name them.
 Money due after the statement's last day (the cut-off) is an open item (OPEN).
 
 A chained set (`d_two_periods`) is one seller over consecutive months, one folder per period
@@ -37,6 +38,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import random
 import unicodedata
 from collections import defaultdict
@@ -60,7 +62,9 @@ SHIP_DAYS = 7  # a self-shipped order is picked up within this many days of bein
 GRACE_DAYS = 3  # added to a due date before money or a shipment is overdue at the cut-off
 CHANNELS = ("website", "shopee", "tiktok", "facebook")
 FILES = ("oms_orders.csv", "bank_statement.csv", "logistics_report.csv", "shopee_settlement.csv",
-         "tiktok_settlement.csv", "ground_truth.csv", "links.csv")
+         "tiktok_settlement.csv")
+# The answers, kept out of the input folders: `<out>/<market>/labels/<set>/` (see `labels_for`).
+LABELS, LABEL_FILES = "labels", ("ground_truth.csv", "links.csv")
 DIGITS, ALPHANUMERIC = "0123456789", "0123456789ABCDEFGHJKLMNPQRSTUVWXYZ"
 
 
@@ -1169,14 +1173,21 @@ def config_for(market: Market, profile: Profile, cutoff: str | None = None,
                    "status_policy": {"delivered": ["payment", "shipment"], "shipped": ["payment", "shipment"]}},
         "period": {"cutoff": cutoff or cutoff_for(profile), "grace_days": GRACE_DAYS},
         "resolutions": [],
-        "ground_truth": "ground_truth.csv",
-        "link_truth": "links.csv",
         **({"open_items": open_items} if open_items else {}),
     }
 
 
+def labels_for(set_dir: str | Path) -> Path:
+    """The labels folder of a set at `<out>/<market>/<set>[/<period>]`: `<out>/<market>/labels/<set>[/<period>]`."""
+    set_dir = Path(set_dir)
+    for market in (set_dir.parent, set_dir.parent.parent):
+        if market.name in {m.code for m in MARKETS.values()}:
+            return market / LABELS / set_dir.relative_to(market)
+    raise ValueError(f"{set_dir} is not a set folder under <out>/<market>/")
+
+
 def baseline(set_dir: str | Path) -> dict[str, Any]:
-    """Today's engine on one set, with every Health warning acknowledged so the gate can open."""
+    """Today's engine on one set, scored on its labels, with every Health warning acknowledged so the gate can open."""
     from recon.acknowledgement import acknowledge_warnings
     from recon.evaluation import metrics
     from recon.pipeline import inspect, load_config, run
@@ -1185,7 +1196,7 @@ def baseline(set_dir: str | Path) -> dict[str, Any]:
     config = load_config(set_dir / "config.json")
     report = inspect(set_dir, config)
     config = acknowledge_warnings(config, report, "baseline: every warning acknowledged unread")
-    outcome = run(set_dir, config)
+    outcome = run(set_dir, config, labels=labels_for(set_dir))
     if outcome.blocked:
         return {"status": "BLOCKED", "blocking": [issue.id for issue in outcome.open_issues]}
     scored = metrics(outcome.results)
@@ -1238,12 +1249,19 @@ def open_items_of(set_dir: Path) -> pd.DataFrame:
 
 def _write_set(folder: Path, frames: dict[str, pd.DataFrame], manifest: dict[str, Any], config: dict[str, Any],
                with_baseline: bool) -> dict[str, Any]:
-    folder.mkdir(parents=True, exist_ok=True)
-    manifest = {**manifest, "files": {}}
+    labels = labels_for(folder)
+    for place in (folder, labels):
+        place.mkdir(parents=True, exist_ok=True)
+    manifest = {**manifest, "files": {}, "labels": {"folder": Path(os.path.relpath(labels, folder)).as_posix(),
+                                                   "files": {}}}
     for name, frame in frames.items():
-        frame.to_csv(folder / name, index=False)
-        manifest["files"][name] = {"rows": len(frame),
-                                   "sha256": hashlib.sha256((folder / name).read_bytes()).hexdigest()}
+        if name in LABEL_FILES:
+            path, listed = labels / name, manifest["labels"]["files"]
+            (folder / name).unlink(missing_ok=True)  # sets once kept their labels inside
+        else:
+            path, listed = folder / name, manifest["files"]
+        frame.to_csv(path, index=False)
+        listed[name] = {"rows": len(frame), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
     (folder / "config.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
     if with_baseline:
         manifest["baseline"] = baseline(folder)

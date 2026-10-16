@@ -8,7 +8,7 @@ from pathlib import Path
 import pandas as pd
 import pytest
 
-from recon.channeldata import FILES, MARKETS, generate
+from recon.channeldata import FILES, LABEL_FILES, LABELS, MARKETS, generate, labels_for
 from recon.pipeline import inspect, load_config
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,19 +36,31 @@ def test_generation_is_deterministic_and_matches_the_committed_sets(sets, tmp_pa
     for market in MARKETS:
         generate(ROOT / "brazil ecom", tmp_path, market=market, with_baseline=False)
     for market, profile in SETS:
-        for name in (*FILES, "config.json"):
-            fresh = sets / market / profile / name
-            assert _digest(fresh) == _digest(tmp_path / market / profile / name), name
-            committed = COMMITTED / market / profile / name
+        files = [Path(market, profile, name) for name in (*FILES, "config.json")]
+        files += [Path(market, LABELS, profile, name) for name in LABEL_FILES]
+        for path in files:
+            fresh = sets / path
+            assert _digest(fresh) == _digest(tmp_path / path), path
+            committed = COMMITTED / path
             if committed.exists():
                 assert _digest(fresh) == _digest(committed), \
-                    f"test/{market}/{profile}/{name} is stale: regenerate with python -m recon.channeldata"
+                    f"test/{path.as_posix()} is stale: regenerate with python -m recon.channeldata"
+
+
+def test_labels_are_kept_out_of_the_input_folders(sets):
+    for market, profile in SETS:
+        folder = sets / market / profile
+        assert not any((folder / name).exists() for name in LABEL_FILES)
+        assert all((labels_for(folder) / name).is_file() for name in LABEL_FILES)
+        config = load_config(folder / "config.json")
+        assert config.ground_truth is None and config.link_truth is None
 
 
 @pytest.mark.parametrize("market,profile", SETS)
 def test_every_order_and_record_is_accounted_for(sets, market, profile):
     folder = sets / market / profile
-    oms, truth, links = _read(folder, "oms_orders.csv"), _read(folder, "ground_truth.csv"), _read(folder, "links.csv")
+    labels = labels_for(folder)
+    oms, truth, links = _read(folder, "oms_orders.csv"), _read(labels, "ground_truth.csv"), _read(labels, "links.csv")
     assert truth["order_id"].is_unique and set(truth["order_id"]) == set(oms["order_id"])
     linked = links.groupby("feed")["record_key"].agg(set)
     assert set(_read(folder, "bank_statement.csv")["txn_ref"]) == linked["bank"]
@@ -64,7 +76,7 @@ def test_every_order_and_record_is_accounted_for(sets, market, profile):
 def test_each_batched_credit_equals_its_parts(sets, market, profile):
     folder = sets / market / profile
     bank = pd.read_csv(folder / "bank_statement.csv", keep_default_na=False).set_index("txn_ref")
-    links = _read(folder, "links.csv")
+    links = _read(labels_for(folder), "links.csv")
     for name, (_, payout, net) in MARKETS[market].seller.SETTLEMENT_KEYS.items():
         rows = pd.read_csv(folder / name, dtype={payout: str})
         for payout_id, total in rows.groupby(payout)[net].sum().items():

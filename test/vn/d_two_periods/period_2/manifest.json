@@ -147,17 +147,22 @@
       "rows": 45,
       "sha256": "08d51f38a1d7ec65b0e6e3c2c6b1f381a624cdccc5d287a9574746b9d975df58"
     },
-    "ground_truth.csv": {
-      "rows": 471,
-      "sha256": "b1d05ae1ee85711c65f67fd7321704b3f0327a8776e6674e13c63f3a6fe09c6b"
-    },
-    "links.csv": {
-      "rows": 985,
-      "sha256": "5aaafb3d1dd7775f096add0f422b7c22052909f2dbb8d8da63e1071dd98140bc"
-    },
     "open_items.csv": {
       "rows": 84,
       "sha256": "dc83d6b611db7c4adf1e009ba3fc036de1429caa320105d31791e2f8ea6753c1"
+    }
+  },
+  "labels": {
+    "folder": "../../labels/d_two_periods/period_2",
+    "files": {
+      "ground_truth.csv": {
+        "rows": 471,
+        "sha256": "b1d05ae1ee85711c65f67fd7321704b3f0327a8776e6674e13c63f3a6fe09c6b"
+      },
+      "links.csv": {
+        "rows": 985,
+        "sha256": "5aaafb3d1dd7775f096add0f422b7c22052909f2dbb8d8da63e1071dd98140bc"
+      }
     }
   },
   "baseline": {

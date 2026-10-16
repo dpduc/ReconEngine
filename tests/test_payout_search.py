@@ -8,6 +8,7 @@ import pandas as pd
 import pytest
 
 from recon.acknowledgement import acknowledge_warnings
+from recon.channeldata import labels_for
 from recon.config import MARKETPLACE, Channel, FeedSpec, Policy, RunConfig
 from recon.funnel.payout_search import MAX_POOL, find_sets
 from recon.pipeline import inspect, run
@@ -101,9 +102,9 @@ def test_the_marketplace_set_without_its_reports_reviews_every_payout_and_ranks_
         data["channels"][name].pop("settlement")
         data["channels"][name]["payout_pattern"] = rf"{label} THANH TOAN DOANH THU (?P<payout>\d+)"
     config = RunConfig.from_dict(data)
-    outcome = run(folder, acknowledge_warnings(config, inspect(folder, config), "test"))
+    outcome = run(folder, acknowledge_warnings(config, inspect(folder, config), "test"), labels=labels_for(folder))
     market = outcome.results[outcome.results["channel"].isin(["shopee", "tiktok"])]
-    links = pd.read_csv(folder / "links.csv", dtype=str, keep_default_na=False)
+    links = pd.read_csv(labels_for(folder) / "links.csv", dtype=str, keep_default_na=False)
     payout_of = links[links["link_kind"].eq("payout_batch")].set_index("order_id")["record_key"]
 
     assert not market["decision"].eq("AUTO_ACCEPT").any()

@@ -5,3 +5,4 @@ __pycache__/
 data/generated/
 data/scaled/
 data/audit/
+runs/
