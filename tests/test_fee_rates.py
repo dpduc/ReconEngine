@@ -66,7 +66,7 @@ def test_a_payment_type_without_a_rate_is_a_warning_and_falls_back_to_the_mdr(tm
 
 
 def test_no_fee_mismatch_in_the_vietnamese_sets_comes_from_a_bank_transfer():
-    for folder in sorted((ROOT / "test" / "vn").iterdir()):
+    for folder in sorted(config.parent for config in (ROOT / "test" / "vn").rglob("config.json")):
         config = load_config(folder / "config.json")
         results = run(folder, acknowledge_warnings(config, inspect(folder, config), "test")).results
         fee = results[results["reason_codes"].str.split("|").map(lambda codes: "FEE_MISMATCH" in codes)]

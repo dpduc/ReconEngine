@@ -118,6 +118,12 @@ class Channel:
                  each COD order is paid by a credit of its own).
 
     `amount_tolerance` (None: the policy's) applies to the channel's line checks and batch tie-out.
+
+    When the money of an order is due (ADR 0002): a prepaid order's on its order date. A COD or
+    marketplace order's on the first of `payout_weekdays` (0 = Monday; empty: any day) after its
+    delivery plus `release_days`. Without a shipment record, `settlement_days` after its order date
+    (None: not due until delivered); a shipment not yet delivered is not due. A shipment is due
+    `ship_days` after the order date (None: always due).
     """
 
     chain: str = PREPAID
@@ -126,8 +132,15 @@ class Channel:
     fee_bps: int | None = None
     amount_tolerance: float | None = None
     cod_remittances: bool = False
+    release_days: int = 0
+    payout_weekdays: tuple[int, ...] = ()
+    settlement_days: int | None = None
+    ship_days: int | None = None
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "payout_weekdays", tuple(int(d) for d in self.payout_weekdays))
+        if any(not 0 <= d <= 6 for d in self.payout_weekdays):
+            raise ValueError("payout_weekdays are 0 (Monday) to 6 (Sunday)")
         if self.chain not in CHAINS:
             raise ValueError(f"unknown money chain {self.chain!r}; expected one of {', '.join(CHAINS)}")
         if self.order_ref_pattern is not None:
@@ -138,6 +151,22 @@ class Channel:
 
     def tolerance(self, policy: Policy) -> float:
         return policy.amount_tolerance if self.amount_tolerance is None else self.amount_tolerance
+
+
+@dataclass(frozen=True)
+class Period:
+    """The period a run reconciles (ADR 0002). `cutoff` (an ISO date) is its last day: money and
+    shipments after it do not count, and an order whose money is due later is an open item.
+    `grace_days` are added to a due date before it is called overdue."""
+
+    cutoff: str
+    grace_days: int = 3
+
+    def __post_init__(self) -> None:
+        import pandas as pd
+
+        if pd.isna(pd.to_datetime(self.cutoff, format="ISO8601", errors="coerce")):
+            raise ValueError(f"period cutoff {self.cutoff!r} is not an ISO date (e.g. 2025-12-15)")
 
 
 @dataclass(frozen=True)
@@ -160,8 +189,13 @@ class RunConfig:
     link_truth: str | None = None  # optional true links CSV (feed, record_key, order_id[, link_kind])
     # OMS `channel` value -> its channel. None declared: every order is on one default prepaid chain.
     channels: dict[str, Channel] = field(default_factory=dict)
+    period: Period | None = None  # None: no cut-off; money not found is missing, whenever it is due
+    # The previous run's open_items.csv (relative to the sources folder): its orders join this run.
+    open_items: str | None = None
 
     def __post_init__(self) -> None:
+        if isinstance(self.period, dict):
+            object.__setattr__(self, "period", Period(**self.period))
         for name, spec in self.feeds.items():
             if name in FEEDS:
                 if spec.role not in (None, DEFAULT_ROLES[name]):
@@ -234,6 +268,8 @@ class RunConfig:
             ground_truth=data.get("ground_truth"),
             link_truth=data.get("link_truth"),
             channels={name: Channel(**spec) for name, spec in data.get("channels", {}).items()},
+            period=Period(**data["period"]) if data.get("period") else None,
+            open_items=data.get("open_items"),
         )
 
     def to_json(self) -> str:

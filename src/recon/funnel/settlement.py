@@ -27,6 +27,7 @@ from recon.config import Channel, Policy
 from recon.funnel.base import FunnelContext, StepOutcome, decide, pass_on, split
 from recon.funnel.decision import TIE_OUT_CONFIDENCE
 from recon.funnel.linking import attach_bank, bank_frame, link_one_to_one, attach_exact
+from recon.funnel.periods import NOT_YET_DUE, missing_payment
 from recon.funnel.reasons import exception
 from recon.funnel.rules import within
 from recon.schema import (
@@ -34,6 +35,7 @@ from recon.schema import (
     CHANNEL,
     CHANNEL_ORDER_NO,
     EXCEPTION,
+    OPEN,
     FEE_PREFIX,
     INGESTED_AT,
     ITEM_TOTAL,
@@ -88,13 +90,14 @@ def _refund(frame: pd.DataFrame) -> pd.Series:
 class Settlements:
     batches: pd.DataFrame  # one row per (settlement feed, payout id): BATCH_COLUMNS plus bank_pos
     credit_rows: frozenset[int]  # bank source rows naming any of the batches
+    shipment_rows: frozenset[int] = frozenset()  # logistics source rows on a remittance: lines of a batch
 
     # `|` joins payouts and remittances (funnel.remittance: feed "logistics", the carrier as `channel`).
 
     def __or__(self, other: Settlements) -> Settlements:
         frames = [b for b in (self.batches, other.batches) if len(b)]
         return Settlements(pd.concat(frames, ignore_index=True) if frames else self.batches,
-                           self.credit_rows | other.credit_rows)
+                           self.credit_rows | other.credit_rows, self.shipment_rows | other.shipment_rows)
 
 
 def settle_batches(feeds: dict[str, pd.DataFrame], marketplaces: dict[str, Channel], policy: Policy) -> Settlements:
@@ -223,7 +226,7 @@ def settle_marketplace(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
     ]
     for reason, mask in checks:
         failed, open_ = split(open_, mask.reindex(open_.index).fillna(False).astype(bool))
-        decided.append(exception(failed, reason))
+        decided.append(missing_payment(failed, ctx) if reason == "MISSING_PAYMENT" else exception(failed, reason))
     batch = open_["batch_reason"].isin([BATCH_MISMATCH, CREDIT_AMBIGUOUS])
     review, open_ = split(open_, batch)
     decided.append(decide(review, REVIEW, BATCH_REVIEW_CONFIDENCE, review["batch_reason"]))
@@ -236,7 +239,8 @@ def settle_marketplace(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
 
 def batch_results(batches: pd.DataFrame, results: pd.DataFrame) -> pd.DataFrame:
     """The batches as exported: BATCH_COLUMNS, plus how many orders of this run each pays and which of
-    those orders are exceptions on their own line."""
+    those orders are exceptions on their own line. A batch without a credit whose orders are all
+    OPEN is OPEN too: not yet paid, but not yet due."""
     columns = [*BATCH_COLUMNS, "orders", "exception_orders"]
     if batches.empty or "batch_id" not in results:
         return batches.drop(columns="bank_pos").assign(orders=0, exception_orders="").reindex(columns=columns)
@@ -246,8 +250,13 @@ def batch_results(batches: pd.DataFrame, results: pd.DataFrame) -> pd.DataFrame:
     per_batch = linked.groupby(keys).agg(
         orders=("order_id", "size"),
         exception_orders=("order_id", lambda ids: "|".join(
-            ids[linked.loc[ids.index, "decision"].eq(EXCEPTION)].astype(str))))
+            ids[linked.loc[ids.index, "decision"].eq(EXCEPTION)].astype(str))),
+        open_orders=("decision", lambda decisions: int(decisions.eq(OPEN).sum())))
     out = batches.drop(columns="bank_pos").merge(per_batch.reset_index(), on=keys, how="left")
     out["orders"] = out["orders"].fillna(0).astype(int)
     out["exception_orders"] = out["exception_orders"].fillna("")
+    waiting = out["reason_codes"].eq("MISSING_PAYMENT") & out["orders"].gt(0) & out["open_orders"].eq(out["orders"])
+    out.loc[waiting, ["decision", "reason_codes"]] = [OPEN, NOT_YET_DUE]
+    out.loc[waiting, "explanation"] = out.loc[waiting, "explanation"].str.rstrip(".") + (
+        ": none of its orders is due before the cut-off.")
     return out[columns]

@@ -70,8 +70,9 @@ outcome.results          # one row per unit: deciding step, decision, reason cod
 outcome.exception_queue  # EXCEPTION + REVIEW units and orphans, ranked
 outcome.close_watchlist # auto-accepted with a note; revisit first if the period won't close
 outcome.settlement_batches  # one row per settlement batch (payout or remittance): its lines, credit and tie-out
+outcome.open_items       # OPEN units as OMS rows with their due date: the next run's `open_items` input
 outcome.bundle()         # decisions, triage queue, exception queue, orphans, close watchlist, funnel, excluded rows,
-                         # settlement batches, manifest
+                         # settlement batches, open items, manifest
 ```
 
 ### Run config
@@ -83,10 +84,15 @@ A run config is a JSON file (or YAML, if PyYAML is installed) with these parts:
   - `prepaid`: optionally, the `order_ref_pattern` that finds its orders in a bank description (named group `ref`, e.g. `"DON (?P<ref>#\\d+)"`).
   - `marketplace`: `settlement` names the channel's settlement report. An order links to its line by the OMS `channel_order_no`, and the line's payout to the bank credit whose description (or `payout_id` column) names it. `fee_bps` is the channel's total fee on a line's gross (unset: fees are not checked). A line's gross is compared with the OMS `item_total` when mapped, else with `order_amount`. `amount_tolerance` overrides the policy's for the channel's checks.
   - `cod_remittances` (any chain): the channel's COD orders are paid by carrier remittances. An order links to its shipment by order reference, and the shipment's `remittance_id` (a logistics column) to the bank credit whose description names it. A shipment whose logistics `status` is `RETURNED` collected nothing. The COD fee is checked against the policy's `cod_fee_bps`. Without it, each COD order is paid by a credit of its own.
+  - Payment terms (any chain), for a run with a `period`: `release_days` and `payout_weekdays` (0 = Monday) say when a delivered COD or marketplace order's money is due, `settlement_days` when one with no shipment record is, and `ship_days` when a shipment is due. A prepaid order's money is due on its order date. See [Periods and open items](#periods-and-open-items).
 - `mapping`: canonical column → source column, for each feed.
 - `policy`: absolute amount tolerance (default 0.01), date window for linking (default ±4 days), fee rates (`mdr_bps`, overridden per bank `payment_type` by `payment_type_fee_bps`, e.g. `{"bank_transfer": 0, "wallet": 110}`), `payer_pattern` (a regex with a named group `payer` that finds the payer in a bank description, when the bank feed has no `payer_name` column; compared with the OMS `customer_name` in linking pass 2), a `status_policy` that says which order statuses need payment and/or shipment evidence, and an optional `fx` setting (see [Currencies and FX](#currencies-and-fx)).
 - `resolutions`: the fixes and acknowledgements recorded in the Fix step.
-- `ground_truth`: optional. When set, precision and recall are reported for each reason code.
+- `period`: optional. Its `cutoff` (an ISO date) is the period's last day; `grace_days` (default 3) are added to
+  every due date. Without a period, missing money and shipments are always exceptions.
+- `open_items`: optional. The previous run's `open_items.csv`; its orders join this run.
+- `ground_truth`: optional. Each order's expected outcome: `PASS_1` / `PASS_2` (auto-accept), `REVIEW`, `EXCEPTION`
+  or `OPEN`. Accuracy scores the four decisions, and precision and recall are reported for each reason code.
 
 `configs/olist_benchmark.json` is the config for the benchmark, with every warning acknowledged.
 
@@ -164,14 +170,26 @@ missing shipments.
 | 8 | `route_review` | REVIEW: duplicate keys whose strategy is "route to review" |
 | 9 | rule checks | `MISSING_PAYMENT` → `CURRENCY_MISMATCH` → `DUPLICATE_PAYMENT` (several credits, one of which alone pays the order) → `FX_DIFFERENCE` → `AMOUNT_MISMATCH` → `MISSING_SHIPMENT` → fee / COD fee → `TIMING_MISMATCH` → `POSSIBLE_INSTALLMENT_INTEREST` (REVIEW) |
 | 10 | `decision` | `AUTO_ACCEPT` (`INSTALLMENT_INTEREST` when the stated interest explains the delta) |
-| 11 | `reverse_pass` | `ORPHAN_PAYMENT` / `ORPHAN_SHIPMENT`: bank or 3PL records that link to no order (payout and remittance credits are reported on their settlement batch instead) |
+| 11 | `reverse_pass` | `ORPHAN_PAYMENT` / `ORPHAN_SHIPMENT`: bank or 3PL records that link to no order (payout and remittance credits, and the shipments on a remittance, are reported on their settlement batch instead) |
 
 Each unit gets one reason code (the first check it fails) and a plain-language
 explanation. A problem on a marketplace order's own line, or a COD order's own shipment, is reported on that order even
 when its batch is also off.
-Each settlement batch gets its own result (`BATCH_TIE_OUT`, `MISSING_PAYMENT`, `SETTLEMENT_BATCH_MISMATCH` or
-`PAYOUT_CREDIT_AMBIGUOUS`), with the orders of the run among its lines and those that are exceptions. It also records the step that decided it, the rule version and the
+Each settlement batch gets its own result (`BATCH_TIE_OUT`, `MISSING_PAYMENT`, `SETTLEMENT_BATCH_MISMATCH`,
+`PAYOUT_CREDIT_AMBIGUOUS`, or OPEN `NOT_YET_DUE` when none of its orders is due yet), with the orders of the run among its lines and those that are exceptions. It also records the step that decided it, the rule version and the
 hashes of the input rows behind it.
+
+### Periods and open items
+
+A run with a `period` reconciles up to its cut-off. Wherever money or a shipment is missing because it has not
+arrived, the order is checked against its due date (plus the grace days):
+
+- **Not yet due:** OPEN `NOT_YET_DUE`, a fourth decision. The order is an open item, exported in `open_items.csv`.
+- **Overdue:** `MISSING_PAYMENT` or `MISSING_SHIPMENT` as before, with the due date in the explanation.
+
+The next run takes that file as `open_items`. Its orders join the run's own orders, so credits, settlement lines and
+parcels for them link to them instead of becoming orphans. The manifest reports how many were carried in, cleared,
+still open or now in the queue.
 
 ## Benchmark results
 
@@ -211,9 +229,9 @@ On the Olist benchmark, all 196,078 links are made in pass 1 and are correct.
 
 The Vietnamese multi-channel sets (`test/vn`) record a baseline in their manifests. Marketplace orders are settled
 through their Shopee and TikTok Shop reports and COD orders through the GHN, GHTK and J&T remittances, so every
-settlement line, payout credit and remittance credit is linked, and split transfers link as a group. Accuracy is
-96.7–100% with an auto-accept precision of 1.0; the orders still wrong are payer-name cases whose truth is REVIEW,
-which the scoring counts as wrong (#43).
+settlement line, payout credit and remittance credit is linked, and split transfers link as a group. Money due
+after the cut-off is OPEN. Every set scores 100% on the four decisions, with an auto-accept precision of 1.0.
+`d_two_periods` is one seller over two months: `period_2` takes `period_1`'s open items and clears them.
 
 **Known gaps in the benchmark:**
 

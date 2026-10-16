@@ -14,6 +14,7 @@ from recon.contracts import fee
 from recon.funnel.base import FunnelContext, FunnelStep, StepOutcome, cod_remittance, decide, split
 from recon.funnel.fx import lookup_rates
 from recon.funnel.linking import SPLIT_AMOUNTS
+from recon.funnel.periods import missing_payment, missing_shipment
 from recon.funnel.reasons import exception
 from recon.schema import CURRENCY, INSTALLMENTS, INTEREST_AMOUNT, PAYMENT_TYPE, REVIEW
 
@@ -157,6 +158,22 @@ def _rule(reason: str, fails: Callable[[pd.DataFrame], pd.Series]):
     return check
 
 
+def _missing_payment(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
+    """Units needing payment with no bank record become EXCEPTION(MISSING_PAYMENT), or OPEN while
+    their money is not yet due at the cut-off (see funnel.periods)."""
+    units = _measure(units, ctx)
+    failed, remaining = split(units, (units["requires_payment"] & ~units["bank_found"]).astype(bool))
+    return StepOutcome(decided=missing_payment(failed, ctx), remaining=remaining)
+
+
+def _missing_shipment(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
+    """Units needing a shipment with none linked become EXCEPTION(MISSING_SHIPMENT), or OPEN while
+    not yet due to ship at the cut-off (see funnel.periods)."""
+    units = _measure(units, ctx)
+    failed, remaining = split(units, (units["requires_shipment"] & ~units["shipment_found"]).astype(bool))
+    return StepOutcome(decided=missing_shipment(failed, ctx), remaining=remaining)
+
+
 POSSIBLE_INTEREST_CONFIDENCE = 0.5
 
 
@@ -169,15 +186,14 @@ def possible_installment_interest(units: pd.DataFrame, ctx: FunnelContext) -> St
 
 
 RULE_STEPS: list[FunnelStep] = [
-    FunnelStep("missing_payment", _rule("MISSING_PAYMENT", lambda u: u["requires_payment"] & ~u["bank_found"])),
+    FunnelStep("missing_payment", _missing_payment),
     FunnelStep("currency_mismatch", _rule("CURRENCY_MISMATCH", lambda u: u["bank_found"] & ~u["currency_ok"])),
     FunnelStep("duplicate_payment", _rule("DUPLICATE_PAYMENT", lambda u: u["bank_found"] & u["duplicate_payment"])),
     FunnelStep("fx_difference", _rule("FX_DIFFERENCE", lambda u: u["bank_found"] & ~u["amount_within_tolerance"]
                                       & u["fx_within_tolerance"])),
     FunnelStep("amount_mismatch", _rule("AMOUNT_MISMATCH", lambda u: u["bank_found"] & ~u["amount_within_tolerance"]
                                         & ~u["interest_explained"] & ~u["interest_possible"])),
-    FunnelStep("missing_shipment", _rule("MISSING_SHIPMENT",
-                                         lambda u: u["requires_shipment"] & ~u["shipment_found"])),
+    FunnelStep("missing_shipment", _missing_shipment),
     FunnelStep("fee_mismatch", _rule("FEE_MISMATCH", lambda u: u["bank_found"] & ~u["fee_within_tolerance"])),
     FunnelStep("cod_fee_mismatch", _rule("COD_FEE_MISMATCH",
                                          lambda u: u["shipment_found"] & ~u["cod_fee_within_tolerance"])),

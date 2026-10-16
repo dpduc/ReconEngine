@@ -72,11 +72,11 @@ def generate_from_olist(
         has_shipment = row.order_status in {"delivered", "shipped"}
         if amount is None or payment is None:
             scenario = "INCOMPLETE_SOURCE"
-            expected_outcome = "REVIEW"
+            expected_outcome = "EXCEPTION"
             expected_exception = "MISSING_SOURCE_EVIDENCE"
         elif row.order_status not in {"delivered", "shipped"}:
             scenario = "STATUS_PENDING_POLICY"
-            expected_outcome = "REVIEW"
+            expected_outcome = "EXCEPTION"
             expected_exception = "ORDER_STATUS_REQUIRES_POLICY"
         else:
             draw = rng.random()
@@ -153,7 +153,7 @@ def generate_from_olist(
         files[name] = {"rows": len(frame), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
     manifest = {
         "generator": "recon.olistdata",
-        "generator_version": "1.3.0",
+        "generator_version": "1.4.0",
         "source": "brazil ecom",
         "source_files": ["olist_orders_dataset.csv", "olist_order_items_dataset.csv", "olist_order_payments_dataset.csv"],
         "seed": seed, "units": len(truth_rows), "currency": "BRL",

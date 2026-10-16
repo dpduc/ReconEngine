@@ -6,7 +6,10 @@ from typing import Any
 
 import pandas as pd
 
-from recon.schema import AUTO_ACCEPT, EXCEPTION, REVIEW
+from recon.schema import AUTO_ACCEPT, DECISIONS, EXCEPTION, OPEN, REVIEW
+
+# Expected outcome in a ground truth -> the decision it expects (PASS_1 / PASS_2: linked in that pass).
+TRUTH_DECISIONS = {"PASS_1": AUTO_ACCEPT, "PASS_2": AUTO_ACCEPT, REVIEW: REVIEW, OPEN: OPEN}
 
 
 def attach_truth(results: pd.DataFrame, truth: pd.DataFrame) -> pd.DataFrame:
@@ -14,9 +17,7 @@ def attach_truth(results: pd.DataFrame, truth: pd.DataFrame) -> pd.DataFrame:
         columns={"expected_outcome": "truth_outcome", "expected_exception": "truth_exception"}
     )
     out = results.merge(truth[["order_id", "scenario", "sub_kind", "truth_outcome", "truth_exception"]], on="order_id", how="left")
-    out["truth_decision"] = out["truth_outcome"].map(
-        lambda value: AUTO_ACCEPT if value in {"PASS_1", "PASS_2"} else EXCEPTION
-    )
+    out["truth_decision"] = out["truth_outcome"].map(lambda value: TRUTH_DECISIONS.get(value, EXCEPTION))
     out["is_correct"] = out["decision"].eq(out["truth_decision"])
     return out
 
@@ -161,6 +162,15 @@ def link_metrics(results: pd.DataFrame, truth: pd.DataFrame,
     }
 
 
+def _decision_matrix(scored: pd.DataFrame) -> dict[str, dict[str, int]]:
+    """Expected decision -> {decision made: units}, over the four decisions."""
+    if scored.empty:
+        return {}
+    counts = scored.groupby(["truth_decision", "decision"]).size()
+    return {truth: {made: int(counts.get((truth, made), 0)) for made in DECISIONS if counts.get((truth, made), 0)}
+            for truth in DECISIONS if truth in counts.index.get_level_values(0)}
+
+
 def metrics(results: pd.DataFrame) -> dict[str, Any]:
     accepted = results[results["decision"] == AUTO_ACCEPT]
     reviewed = results[results["decision"] == REVIEW]
@@ -173,6 +183,7 @@ def metrics(results: pd.DataFrame) -> dict[str, Any]:
         "review_rate": float(len(reviewed) / len(results)) if len(results) else 0.0,
         "auto_accept_precision": float(accepted["is_correct"].mean()) if len(accepted) and "is_correct" in accepted else None,
         "accuracy": float(scored["is_correct"].mean()) if len(scored) else None,
+        "decisions": _decision_matrix(scored),
         "scenario_counts": {k: int(v) for k, v in results["reason_codes"].value_counts().head(12).items()},
         "per_reason_code": per_reason_code(results),
     }

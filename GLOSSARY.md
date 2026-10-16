@@ -57,7 +57,7 @@ What the engine concludes about a unit: auto-accept, review, exception or open.
 _Avoid_: outcome, status, result
 
 **Open item**:
-A unit whose money is not yet due at the cut-off; it is carried into the next period.
+A unit whose money or shipment is not yet due at the cut-off; it is carried into the next period.
 _Avoid_: pending, in transit (as decision names)
 
 ## Periods
@@ -69,3 +69,7 @@ _Avoid_: month (periods need not be months), window
 **Cut-off**:
 The moment after which money and shipments no longer count for the period.
 _Avoid_: statement date, close date
+
+**Due date**:
+The day by which an order's money or shipment should have arrived, by its channel's payment terms plus a grace period.
+_Avoid_: deadline, expected date

@@ -48,6 +48,7 @@ from recon.health import (
     Severity,
 )
 from recon.ingest import LoadedFeed, Sources, describe_sources, load_feed, parse_numeric, read_source, sha256
+from recon.open_items import carry_in, open_item_counts, open_items
 from recon.mapping import (
     DraftConfig,
     MappingProfile,
@@ -164,28 +165,36 @@ def _run(sources: Sources, config: RunConfig, meter: RunMeter) -> ReconRun:
         return ReconRun(status=BLOCKED, health=prepared.report, excluded=prepared.excluded, manifest=manifest)
     policy = config.resolved_policy
     rate_table = read_source(sources, policy.fx.rate_table) if policy.fx and policy.fx.rate_table else None
+    feeds = prepared.feeds
+    carried = read_source(sources, config.open_items) if config.open_items else None
+    if carried is not None:
+        with timer.stage("open_items"):
+            feeds = {**feeds, "oms": carry_in(feeds["oms"], carried, config.open_items,
+                                              datetime.now(timezone.utc).isoformat(timespec="seconds"))}
     with timer.stage("settlement_batches"):
-        settlements = settle_batches(prepared.feeds, config.marketplaces, policy)
+        settlements = settle_batches(feeds, config.marketplaces, policy)
         if config.cod_channels:
-            settlements |= remit_batches(prepared.feeds, policy)
-    ctx = FunnelContext(feeds=prepared.feeds, policy=policy, order_ref_patterns=config.order_ref_patterns,
+            settlements |= remit_batches(feeds, policy)
+    ctx = FunnelContext(feeds=feeds, policy=policy, order_ref_patterns=config.order_ref_patterns,
                         date_formats={feed: config.date_format(feed) for feed in config.feeds},
                         fx_rates=read_rate_table(rate_table) if rate_table is not None else None,
                         marketplaces=config.marketplaces, cod_channels=config.cod_channels,
-                        batches=settlements.batches,
+                        channels=config.channels, period=config.period, batches=settlements.batches,
                         payout_credit_rows=settlements.credit_rows)
     with timer.stage("build_units"):
-        units = build_units(prepared.feeds)
+        units = build_units(feeds)
     results, funnel_counts = run_funnel(units, STEPS, ctx, timer)
     batches = batch_results(settlements.batches, results)
     results = remittance_links(results, settlements.batches)
     with timer.stage("reverse_pass"):
-        orphans, reverse_counts = reverse_pass(results, prepared.feeds, settlements.credit_rows)
+        orphans, reverse_counts = reverse_pass(results, feeds, settlements.credit_rows, settlements.shipment_rows)
     funnel_counts = pd.concat([funnel_counts, pd.DataFrame([reverse_counts])], ignore_index=True)
     input_files = {name: {"path": config.feeds[name].path, "sha256": loaded.sha256}
                    for name, loaded in prepared.inputs.items()}
     if rate_table is not None:
         input_files["fx_rates"] = {"path": policy.fx.rate_table, "sha256": sha256(rate_table)}
+    if carried is not None:
+        input_files["open_items"] = {"path": config.open_items, "sha256": sha256(carried)}
     if config.ground_truth:
         with timer.stage("ground_truth"):
             truth = read_source(sources, config.ground_truth)
@@ -206,10 +215,12 @@ def _run(sources: Sources, config: RunConfig, meter: RunMeter) -> ReconRun:
         "metrics": {**metrics(results), "orphans": orphan_counts(orphans),
                     "close_watchlist": watchlist_summary(results),
                     "settlement_batches": {k: int(v) for k, v in batches["reason_codes"].value_counts().items()},
+                    "open_items": open_item_counts(results),
                     **({"links": links} if links else {})},
         "excluded_rows": {k: int(v) for k, v in prepared.excluded["feed"].value_counts().items()},
     }
     manifest["performance"] = meter.performance(units=int(len(results)), input_bytes=input_bytes)
     return ReconRun(status=COMPLETED, health=prepared.report, results=results,
-                    funnel=funnel_counts, manifest=manifest, feeds=prepared.feeds, orphans=orphans,
-                    excluded=prepared.excluded, settlement_batches=batches)
+                    funnel=funnel_counts, manifest=manifest, feeds=feeds, orphans=orphans,
+                    excluded=prepared.excluded, settlement_batches=batches,
+                    open_items=open_items(results, feeds["oms"]))

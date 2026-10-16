@@ -29,6 +29,7 @@ from recon.contracts import fee
 from recon.funnel.base import FunnelContext, StepOutcome, cod_remittance, decide, pass_on, split
 from recon.funnel.decision import TIE_OUT_CONFIDENCE
 from recon.funnel.linking import attach_bank, attach_exact, bank_frame
+from recon.funnel.periods import missing_payment, missing_shipment
 from recon.funnel.reasons import exception
 from recon.funnel.rules import within
 from recon.funnel.settlement import (
@@ -68,7 +69,8 @@ def remit_batches(feeds: dict[str, pd.DataFrame], policy: Policy) -> Settlements
                             gross=float(group["cod_collected"].fillna(0).sum()),
                             fees=float((group["ship_fee"].fillna(0) + group["cod_fee"].fillna(0)).sum()),
                             refund=0.0, net=float(cod_remittance(group).sum())))
-    return Settlements(batch_frame(rows), frozenset(bank.loc[credits["bank_pos"], SOURCE_ROW].astype(int)))
+    return Settlements(batch_frame(rows), frozenset(bank.loc[credits["bank_pos"], SOURCE_ROW].astype(int)),
+                       frozenset(shipments[SOURCE_ROW].astype(int)))
 
 
 def _logistics(units: pd.DataFrame, column: str) -> pd.Series:
@@ -114,18 +116,20 @@ def settle_cod(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
 
     tolerance, decided, open_ = ctx.policy.amount_tolerance, [], measured
     shipped, pay = open_["shipment_found"], open_["requires_payment"]
+    waiting = "MISSING_PAYMENT, not yet"  # money that has not arrived: OPEN while not yet due
     checks = [
         ("MISSING_SHIPMENT", ~shipped & open_["requires_shipment"]),
-        ("MISSING_PAYMENT", ~shipped & pay),
+        (waiting, ~shipped & pay),
         ("MISSING_PAYMENT", open_["shipment_returned"] & pay),
-        ("MISSING_PAYMENT", open_["batch_id"].isna() & pay),
+        (waiting, open_["batch_id"].isna() & pay),
         ("AMOUNT_MISMATCH", pay & ~within(open_["cod_amount_delta"], tolerance)),
         ("COD_FEE_MISMATCH", shipped & ~within(open_["cod_fee_delta"], tolerance)),
-        ("MISSING_PAYMENT", pay & open_["batch_reason"].eq("MISSING_PAYMENT")),
+        (waiting, pay & open_["batch_reason"].eq("MISSING_PAYMENT")),
     ]
     for reason, mask in checks:
         failed, open_ = split(open_, mask.reindex(open_.index).fillna(False).astype(bool))
-        decided.append(exception(failed, reason))
+        hold = {waiting: missing_payment, "MISSING_SHIPMENT": missing_shipment}.get(reason)
+        decided.append(hold(failed, ctx) if hold else exception(failed, reason))
     review, open_ = split(open_, open_["batch_reason"].isin([BATCH_MISMATCH, CREDIT_AMBIGUOUS]))
     decided.append(decide(review, REVIEW, BATCH_REVIEW_CONFIDENCE, review["batch_reason"]))
     reasons = open_["requires_payment"].map({True: "REMITTANCE_TIE_OUT", False: "TIE_OUT_PER_STATUS_POLICY"})

@@ -1,6 +1,6 @@
 {
   "generator": "recon.channeldata",
-  "generator_version": "2.5.0",
+  "generator_version": "2.6.0",
   "market": "vn",
   "source": "brazil ecom",
   "source_files": [
@@ -147,7 +147,7 @@
     },
     "ground_truth.csv": {
       "rows": 606,
-      "sha256": "2ff96867ab817f30f40f4baa76dd8b16c97f2fe570783e5b118515945bb4a03b"
+      "sha256": "5f3c4b287bf2301039dcf123f32a886167bc55bf29d9df3a9491cc2bf751432b"
     },
     "links.csv": {
       "rows": 1709,
@@ -159,11 +159,12 @@
     "warnings_acknowledged": 11,
     "decisions": {
       "AUTO_ACCEPT": 567,
-      "EXCEPTION": 39
+      "EXCEPTION": 26,
+      "OPEN": 13
     },
     "accuracy": 1.0,
     "auto_accept_precision": 1.0,
-    "orphans": 103,
+    "orphans": 3,
     "links": {
       "precision": 1.0,
       "recall": 1.0,

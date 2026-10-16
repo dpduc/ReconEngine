@@ -21,6 +21,12 @@ The OMS holds the month's orders. The bank statement and the settlement reports 
 of the next month, so they carry payouts for last month's orders and miss money not yet released.
 Ground truth is what a correct reconciler with every file concludes, not what the engine does
 today; ``links.csv`` names the true order(s) of every bank line, settlement row and shipment.
+Money due after the statement's last day (the cut-off) is an open item (OPEN).
+
+A chained set (`d_two_periods`) is one seller over consecutive months, one folder per period
+(`period_1`, `period_2`): each period's files end at its month end, as they stood at that cut-off,
+and period 2 takes period 1's open items (``open_items.csv``, written by running the engine on
+period 1) so their money clears them.
 
     python -m recon.channeldata --out test            # test/vn/<set>/
     python -m recon.channeldata --market br --out test
@@ -42,13 +48,16 @@ import pandas as pd
 
 from recon.contracts import fee as vnd_fee
 
-GENERATOR_VERSION = "2.5.0"
+GENERATOR_VERSION = "2.6.0"
 SOURCE_FILES = ("olist_orders_dataset.csv", "olist_order_items_dataset.csv", "olist_order_payments_dataset.csv")
 DATE_SHIFT = pd.Timedelta(days=2926)  # 418 weeks: weekdays kept, Black Friday 2017 -> Black Friday 2025
 DATE_COLUMNS = ("order_purchase_timestamp", "order_approved_at", "order_delivered_carrier_date",
                 "order_delivered_customer_date", "order_estimated_delivery_date")
 PRIOR_DAYS = 21  # last month's orders whose money or shipment can still land in this statement
 STATEMENT_THROUGH_DAY = 15  # the statement and settlement reports run to this day of the next month
+MARKETPLACE_SETTLEMENT_DAYS = 45  # a marketplace order with no line is overdue this long after it was placed
+SHIP_DAYS = 7  # a self-shipped order is picked up within this many days of being placed
+GRACE_DAYS = 3  # added to a due date before money or a shipment is overdue at the cut-off
 CHANNELS = ("website", "shopee", "tiktok", "facebook")
 FILES = ("oms_orders.csv", "bank_statement.csv", "logistics_report.csv", "shopee_settlement.csv",
          "tiktok_settlement.csv", "ground_truth.csv", "links.csv")
@@ -63,8 +72,8 @@ class Truth:
 
 
 MATCHED_DIRECT, MATCHED_INDIRECT = Truth("MATCHED", "PASS_1"), Truth("MATCHED", "PASS_2")
-PENDING = Truth("PENDING_SETTLEMENT", "REVIEW", "PENDING_SETTLEMENT")
-STATUS_PENDING = Truth("STATUS_PENDING_POLICY", "REVIEW", "ORDER_STATUS_REQUIRES_POLICY")
+PENDING = Truth("PENDING_SETTLEMENT", "OPEN", "NOT_YET_DUE")  # money due after the cut-off: an open item
+STATUS_PENDING = Truth("STATUS_PENDING_POLICY", "EXCEPTION", "ORDER_STATUS_REQUIRES_POLICY")
 MISSING_SHIPMENT = Truth("MISSING_SHIPMENT", "EXCEPTION", "MISSING_SHIPMENT")
 MISSING_PAYMENT = Truth("MISSING_PAYMENT", "EXCEPTION", "MISSING_PAYMENT")
 
@@ -150,6 +159,11 @@ VN_PROFILES = (
              "transfer_duplicate": 0.03, "transfer_unpaid": 0.03, "transfer_other_payer": 0.12, "cod_short": 0.02,
              "cod_returned": 0.12, "cod_fee_over": 0.01, "missing_shipment": 0.02, "market_fee_over": 0.02,
              "market_return": 0.02}, 5),
+)
+# One seller over two consecutive months, for carrying open items from one period into the next.
+VN_CHAIN_PROFILES = (
+    Profile("d_two_periods", "A website-first seller over two months; period 2 clears period 1's open items.",
+            "2026-04", 400, {"website": 0.55, "shopee": 0.20, "tiktok": 0.10, "facebook": 0.15}, _VN_CALM, 2),
 )
 _BR_CALM = {"fb_cod": 0.10, "fb_cash": 0.05, "fb_split": 0.05, "fb_haggle": 0.03, "fb_duplicate": 0.01,
             "fb_unpaid": 0.01, "fb_other_payer": 0.05, "cod_short": 0.02, "fb_manual_label": 0.20}
@@ -243,6 +257,7 @@ class _Seller:
         default_factory=lambda: defaultdict(list))
     seq: int = 0
     used: set[str] = field(default_factory=set)
+    payout_days: dict[str, pd.Timestamp] = field(default_factory=dict)  # payout or remittance id -> paid on
 
     CURRENCY: ClassVar[str] = ""
     # settlement file -> (order number, payout id, net) columns
@@ -381,6 +396,7 @@ class _Seller:
         for (kind, label, day), rows in sorted(self.batches.items(), key=lambda item: (item[0][2], item[0][:2])):
             credit = self.money(sum(row["net"] for row in rows))
             payout_id = f"{day:%Y%m%d}{self._code(6, DIGITS)}" if kind != "cod" else rows[0]["remittance"]
+            self.payout_days[payout_id] = day
             description, txn_kind = self.payout_line(kind, label, payout_id)
             ref = self._bank(day + pd.Timedelta(hours=10 if kind != "cod" else 16), description, credit,
                              kind=txn_kind) if credit > 0 else None
@@ -912,15 +928,24 @@ MARKETS = {
 def build_set(olist: pd.DataFrame, market: Market, profile: Profile,
               seed: int) -> tuple[dict[str, pd.DataFrame], dict[str, Any]]:
     """One set's frames (keyed by file name) and its manifest; `olist` is already localized to the market."""
+    _, frames, manifest = _simulate(olist, market, profile, seed)
+    return frames, manifest
+
+
+def _simulate(olist: pd.DataFrame, market: Market, profile: Profile, seed: int, months: int = 1,
+              statement_days: int = STATEMENT_THROUGH_DAY) -> tuple[_Seller, dict[str, pd.DataFrame], dict[str, Any]]:
+    """The seller after replaying `months` months of orders from the profile's month (about
+    `profile.orders` a month), with its frames and manifest. The statement runs `statement_days`
+    days past the last month."""
     rng = random.Random(f"{seed}:{market.code}:{profile.name}")
     start = pd.Timestamp(f"{profile.month}-01")
-    next_month = start + pd.DateOffset(months=1)
-    seller = market.seller(profile, rng, start, next_month + pd.Timedelta(days=STATEMENT_THROUGH_DAY),
+    next_month = start + pd.DateOffset(months=months)
+    seller = market.seller(profile, rng, start, next_month + pd.Timedelta(days=statement_days),
                            market.assumptions)
     placed = olist["order_purchase_timestamp"]
     in_month = olist[(placed >= start) & (placed < next_month)]
     pool = olist[(placed >= start - pd.Timedelta(days=PRIOR_DAYS)) & (placed < next_month)]
-    keep = profile.orders / len(in_month)
+    keep = profile.orders * months / len(in_month)
     channels, weights = list(profile.mix), list(profile.mix.values())
     unit, number = 0, rng.randint(1_000, 9_000)
     for source in pool.itertuples(index=False):
@@ -984,11 +1009,139 @@ def build_set(olist: pd.DataFrame, market: Market, profile: Profile,
             **market.simulated,
         },
     }
-    return frames, manifest
+    return seller, frames, manifest
 
 
-def config_for(market: Market) -> dict[str, Any]:
-    """A runnable engine config for one set. No resolutions: the analyst works through Health."""
+def _as_of(shipments: pd.DataFrame, paid_on: pd.Series, cutoff_end: pd.Timestamp) -> pd.DataFrame:
+    """The logistics report as it stood at a cut-off (`cutoff_end`, exclusive): a parcel delivered
+    later is still in transit and has collected nothing; a remittance paid later is not on it yet."""
+    out = shipments.copy()
+    delivered = pd.to_datetime(out["delivered_at"], errors="coerce")
+    in_transit = delivered >= cutoff_end
+    remitted_later = paid_on.isna() | (paid_on >= cutoff_end)
+    out.loc[in_transit, ["delivered_at"]] = ""
+    out.loc[in_transit, ["cod_collected", "cod_fee"]] = 0
+    out.loc[in_transit | (out["status"].eq("RETURNED") & remitted_later), "status"] = "SHIPPED"
+    out.loc[remitted_later, "remittance_id"] = ""
+    return out
+
+
+def _period_truth(truth: pd.DataFrame, cutoff: pd.Timestamp, money_day: pd.Series, first_pick: pd.Series,
+                  order_day: pd.Series, marketplace: set[str], batched: set[str]) -> None:
+    """Relabel `truth` in place as it stands at `cutoff`, by the terms the set's config states.
+
+    Not yet due at the cut-off is OPEN: money or a parcel landing after it (or after the simulated
+    months), an unpaid transfer or a
+    parcel never shipped while still within its grace or `SHIP_DAYS`. A marketplace payout never
+    made is overdue once `MARKETPLACE_SETTLEMENT_DAYS` have passed.
+    """
+    ids, grace = truth["order_id"], pd.Timedelta(days=GRACE_DAYS)
+    placed = ids.map(order_day)
+    paid_on, picked = ids.map(money_day), ids.map(first_pick).dt.normalize()
+    late = (paid_on > cutoff) | (picked > cutoff)
+    # A tie-out whose money or parcel lands after the simulated months is late at the last cut-off too.
+    unseen = (paid_on.isna() & ~ids.isin(batched)) | (picked.isna() & ~ids.isin(marketplace))
+    late |= truth["expected_outcome"].str.startswith("PASS") & unseen
+    late |= truth["scenario"].eq("MISSING_SHIPMENT") & (placed + pd.Timedelta(days=SHIP_DAYS) + grace > cutoff)
+    late |= truth["scenario"].eq("MISSING_PAYMENT") & (placed + grace > cutoff)
+    stuck = truth["expected_outcome"].eq("OPEN") & ids.isin(marketplace) & (
+        placed + pd.Timedelta(days=MARKETPLACE_SETTLEMENT_DAYS) + grace <= cutoff)
+    late &= ~stuck
+    columns = ["scenario", "sub_kind", "expected_outcome", "expected_exception"]
+    truth.loc[late & ~truth["expected_outcome"].eq("OPEN"), columns] = [
+        "PENDING_SETTLEMENT", "PENDING_SETTLEMENT", "OPEN", "NOT_YET_DUE"]
+    truth.loc[stuck, columns] = ["PAYOUT_OVERDUE", "PAYOUT_OVERDUE", "EXCEPTION", "MISSING_PAYMENT"]
+
+
+def build_chain(olist: pd.DataFrame, market: Market, profile: Profile, seed: int,
+                periods: int = 2) -> list[tuple[dict[str, pd.DataFrame], dict[str, Any]]]:
+    """One seller over `periods` consecutive months, cut into one set per period (frames, manifest).
+
+    A period's files hold its month: its orders, the bank lines and payouts paid in it, and the
+    parcels picked in it or remitted in it, as they stood at its month end (its cut-off). An order
+    whose money lands after the cut-off is OPEN in that period's truth; the next period's truth
+    also covers it, as the open item it carries in.
+    """
+    seller, frames, manifest = _simulate(olist, market, profile, seed, months=periods, statement_days=0)
+    bank, links, truth = frames["bank_statement.csv"], frames["links.csv"], frames["ground_truth.csv"]
+    orders, shipments = frames["oms_orders.csv"], frames["logistics_report.csv"]
+    value_day = pd.to_datetime(bank.set_index("txn_ref")["value_date"])
+    # The credits that pay an order: a remittance pays a COD order; a prepaid parcel only pays its shipping there.
+    cod = set(orders.loc[orders["payment_method"].eq("COD"), "order_id"])
+    paying = links["feed"].eq("bank") & links["order_id"].ne("") & (
+        links["link_kind"].ne("cod_remittance") | links["order_id"].isin(cod))
+    money_day = links[paying].assign(day=links.loc[paying, "record_key"].map(value_day)).groupby("order_id")["day"].max()
+    first_pick = pd.to_datetime(shipments.groupby("client_order_code")["picked_at"].min())
+    order_day = pd.to_datetime(orders.set_index("order_id")["ordered_at"]).dt.normalize()
+    marketplace = set(orders.loc[orders["channel"].isin(list(market.reports)), "order_id"])
+    # Orders on a payout or remittance that was made, even one netting to nothing (no bank credit).
+    remitted = shipments["remittance_id"].isin(list(seller.payout_days)) & shipments["client_order_code"].isin(cod)
+    batched = set(shipments.loc[remitted, "client_order_code"]) | set(
+        links.loc[links["feed"].isin([name.removesuffix("_settlement.csv") for name in seller.SETTLEMENT_KEYS]),
+                  "order_id"])
+    paid_on = pd.Series(seller.payout_days, dtype="datetime64[ns]")
+    remitted_on = pd.to_datetime(shipments["remittance_id"].map(paid_on))
+    picked = pd.to_datetime(shipments["picked_at"])
+    start, carried, out = pd.Timestamp(f"{profile.month}-01"), [], []
+    for number in range(periods):
+        low, high = start + pd.DateOffset(months=number), start + pd.DateOffset(months=number + 1)
+
+        def in_period(days: pd.Series) -> pd.Series:
+            return (days >= low) & (days < high)
+
+        oms = orders[in_period(pd.to_datetime(orders["ordered_at"]))]
+        statement = bank[in_period(pd.to_datetime(bank["value_date"]))]
+        reports = {}
+        for name, (order_column, payout_column, _) in seller.SETTLEMENT_KEYS.items():
+            report = frames[name]
+            reports[name] = report[in_period(pd.to_datetime(report[payout_column].astype(str).map(paid_on)))]                 if len(report) else report
+        listed = (picked < high) & ((picked >= low) | remitted_on.isna() | (remitted_on >= low))
+        logistics = _as_of(shipments[listed], remitted_on[listed], high)
+        units = set(oms["order_id"]) | set(carried)
+        period_truth = truth[truth["order_id"].isin(units)].copy()
+        _period_truth(period_truth, high - pd.Timedelta(days=1), money_day, first_pick, order_day, marketplace,
+                      batched)
+        period_truth["unit_id"] = range(1, len(period_truth) + 1)
+        records = {"bank": set(statement["txn_ref"]), "logistics": set(logistics["tracking_code"])}
+        for name, (order_column, _, _) in seller.SETTLEMENT_KEYS.items():
+            records[name.removesuffix("_settlement.csv")] = set(reports[name][order_column].astype(str))                 if len(reports[name]) else set()
+        kept = [key in records.get(feed, set()) for feed, key in zip(links["feed"], links["record_key"].astype(str))]
+        carried = list(period_truth.loc[period_truth["expected_outcome"].eq("OPEN"), "order_id"])
+        period_frames = {**frames, "oms_orders.csv": oms, "bank_statement.csv": statement,
+                         "logistics_report.csv": logistics, **reports, "ground_truth.csv": period_truth,
+                         "links.csv": links[kept]}
+        period_manifest = {**manifest, "chain": {"period": number + 1, "of": periods},
+                           "period": {"orders": [low.date().isoformat(), (high - pd.Timedelta(days=1)).date().isoformat()],
+                                      "statement": [low.date().isoformat(),
+                                                    (high - pd.Timedelta(days=1)).date().isoformat()]},
+                           "units": len(period_truth), "orders_by_channel": oms["channel"].value_counts().to_dict(),
+                           "scenario_counts": period_truth["scenario"].value_counts().to_dict()}
+        out.append((period_frames, period_manifest))
+    return out
+
+
+def payment_terms(market: Market) -> dict[str, dict[str, Any]]:
+    """Each channel's payment terms (ADR 0002), as the market's assumptions schedule its money: a
+    marketplace's release lag and payout days, the COD remittance days of the other channels."""
+    a = market.assumptions
+    terms = {name: {"release_days": getattr(a, f"{name}_release_days"),
+                    "payout_weekdays": list(getattr(a, f"{name}_payout_weekdays")),
+                    "settlement_days": MARKETPLACE_SETTLEMENT_DAYS} for name in market.reports}
+    cod_days = list(getattr(a, "cod_payout_weekdays", ())) or [a.courier_payout_weekday]
+    return {**terms, **{name: {"payout_weekdays": cod_days, "ship_days": SHIP_DAYS}
+                        for name in CHANNELS if name not in market.reports}}
+
+
+def cutoff_for(profile: Profile) -> str:
+    """The set's cut-off: the last day of its statement."""
+    end = pd.Timestamp(f"{profile.month}-01") + pd.DateOffset(months=1) + pd.Timedelta(days=STATEMENT_THROUGH_DAY - 1)
+    return end.date().isoformat()
+
+
+def config_for(market: Market, profile: Profile, cutoff: str | None = None,
+               open_items: str | None = None) -> dict[str, Any]:
+    """A runnable engine config for one set (cut-off: the end of its statement, unless given).
+    No resolutions: the analyst works through Health."""
     feeds = {name: {"path": f"{file}.csv", "format": "csv", "encoding": "utf-8", "date_format": None}
              for name, file in (("oms", "oms_orders"), ("bank", "bank_statement"), ("logistics", "logistics_report"))}
     for name, report in market.reports.items():
@@ -998,6 +1151,8 @@ def config_for(market: Market) -> dict[str, Any]:
                 if name in market.reports else {} for name in CHANNELS}
     for name in market.cod_remittances:
         channels[name]["cod_remittances"] = True
+    for name, terms in payment_terms(market).items():
+        channels[name].update(terms)
     return {
         "feeds": feeds,
         "channels": channels,
@@ -1012,9 +1167,11 @@ def config_for(market: Market) -> dict[str, Any]:
         },
         "policy": {**market.policy,
                    "status_policy": {"delivered": ["payment", "shipment"], "shipped": ["payment", "shipment"]}},
+        "period": {"cutoff": cutoff or cutoff_for(profile), "grace_days": GRACE_DAYS},
         "resolutions": [],
         "ground_truth": "ground_truth.csv",
         "link_truth": "links.csv",
+        **({"open_items": open_items} if open_items else {}),
     }
 
 
@@ -1052,19 +1209,47 @@ def generate(source_dir: str | Path, out_dir: str | Path, *, market: str = "vn",
     for profile in chosen.profiles:
         frames, manifest = build_set(olist, chosen, profile, seed)
         folder = Path(out_dir) / chosen.code / profile.name
-        folder.mkdir(parents=True, exist_ok=True)
-        manifest["files"] = {}
-        for name, frame in frames.items():
-            frame.to_csv(folder / name, index=False)
-            manifest["files"][name] = {"rows": len(frame),
-                                       "sha256": hashlib.sha256((folder / name).read_bytes()).hexdigest()}
-        (folder / "config.json").write_text(json.dumps(config_for(chosen), indent=2) + "\n", encoding="utf-8")
-        if with_baseline:
-            manifest["baseline"] = baseline(folder)
-        (folder / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str, ensure_ascii=False) + "\n",
-                                              encoding="utf-8")
-        manifests[profile.name] = manifest
+        manifests[profile.name] = _write_set(folder, frames, manifest, config_for(chosen, profile), with_baseline)
+    for profile in VN_CHAIN_PROFILES if chosen.code == "vn" else ():
+        previous = None
+        for number, (frames, manifest) in enumerate(build_chain(olist, chosen, profile, seed), start=1):
+            folder = Path(out_dir) / chosen.code / profile.name / f"period_{number}"
+            cutoff = manifest["period"]["statement"][1]
+            if previous is not None:  # this period's input: the open items the engine left in the last one
+                frames = {**frames, OPEN_ITEMS: open_items_of(previous)}
+            config = config_for(chosen, profile, cutoff, OPEN_ITEMS if previous is not None else None)
+            manifests[f"{profile.name}/period_{number}"] = _write_set(folder, frames, manifest, config, with_baseline)
+            previous = folder
     return manifests
+
+
+OPEN_ITEMS = "open_items.csv"
+
+
+def open_items_of(set_dir: Path) -> pd.DataFrame:
+    """The open items the engine leaves in a set (every Health warning acknowledged)."""
+    from recon.acknowledgement import acknowledge_warnings
+    from recon.pipeline import inspect, load_config, run
+
+    config = load_config(set_dir / "config.json")
+    outcome = run(set_dir, acknowledge_warnings(config, inspect(set_dir, config), "chained set"))
+    return outcome.open_items
+
+
+def _write_set(folder: Path, frames: dict[str, pd.DataFrame], manifest: dict[str, Any], config: dict[str, Any],
+               with_baseline: bool) -> dict[str, Any]:
+    folder.mkdir(parents=True, exist_ok=True)
+    manifest = {**manifest, "files": {}}
+    for name, frame in frames.items():
+        frame.to_csv(folder / name, index=False)
+        manifest["files"][name] = {"rows": len(frame),
+                                   "sha256": hashlib.sha256((folder / name).read_bytes()).hexdigest()}
+    (folder / "config.json").write_text(json.dumps(config, indent=2) + "\n", encoding="utf-8")
+    if with_baseline:
+        manifest["baseline"] = baseline(folder)
+    (folder / "manifest.json").write_text(json.dumps(manifest, indent=2, default=str, ensure_ascii=False) + "\n",
+                                          encoding="utf-8")
+    return manifest
 
 
 if __name__ == "__main__":
