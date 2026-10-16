@@ -78,7 +78,7 @@ A run config is a JSON file (or YAML, if PyYAML is installed) with these parts:
 
 - `feeds`: path, format, encoding, date format and delimiter for each feed.
 - `mapping`: canonical column → source column, for each feed.
-- `policy`: absolute amount tolerance (default 0.01), date window for linking (default ±4 days), fee rates (`mdr_bps`, overridden per bank `payment_type` by `payment_type_fee_bps`, e.g. `{"bank_transfer": 0, "wallet": 110}`), a `status_policy` that says which order statuses need payment and/or shipment evidence, and an optional `fx` setting (see [Currencies and FX](#currencies-and-fx)).
+- `policy`: absolute amount tolerance (default 0.01), date window for linking (default ±4 days), fee rates (`mdr_bps`, overridden per bank `payment_type` by `payment_type_fee_bps`, e.g. `{"bank_transfer": 0, "wallet": 110}`), `payer_pattern` (a regex with a named group `payer` that finds the payer in a bank description, when the bank feed has no `payer_name` column; compared with the OMS `customer_name` in linking pass 2), a `status_policy` that says which order statuses need payment and/or shipment evidence, and an optional `fx` setting (see [Currencies and FX](#currencies-and-fx)).
 - `resolutions`: the fixes and acknowledgements recorded in the Fix step.
 - `ground_truth`: optional. When set, precision and recall are reported for each reason code.
 
@@ -151,7 +151,7 @@ missing shipments.
 | 1 | `missing_source_evidence` | `MISSING_SOURCE_EVIDENCE`: no order amount |
 | 2 | `status_policy` | `ORDER_STATUS_REQUIRES_POLICY`: a status the policy doesn't cover |
 | 3 | `link_exact` | links one-to-one on references (structured `order_ref`, or extracted from the bank description) |
-| 4 | `link_constrained` | links on same currency, amount within tolerance and date within the window. Never auto-matches when several candidates qualify |
+| 4 | `link_constrained` | links on same currency, amount within tolerance and date within the window. Never auto-matches when several candidates qualify, and never links a credit from a different payer than the order's customer |
 | 5 | `link_candidates` | REVIEW with `LINK_CANDIDATES`: proposes candidates with a confidence score, never auto-accepted |
 | 6 | `route_review` | REVIEW: duplicate keys whose strategy is "route to review" |
 | 7 | rule checks | `MISSING_PAYMENT` → `CURRENCY_MISMATCH` → `FX_DIFFERENCE` → `AMOUNT_MISMATCH` → `MISSING_SHIPMENT` → fee / COD fee → `TIMING_MISMATCH` → `POSSIBLE_INSTALLMENT_INTEREST` (REVIEW) |

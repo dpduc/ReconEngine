@@ -42,6 +42,9 @@ PAYMENT_TYPE = "payment_type"
 
 # Optional OMS column the status policy is keyed on.
 ORDER_STATUS = "order_status"
+# Optional payer names: the OMS customer, and the bank payer (a column, or extracted from the description).
+CUSTOMER_NAME = "customer_name"
+PAYER_NAME = "payer_name"
 
 # Set by resolutions on rows taken out of the run; the pipeline reports and removes them.
 EXCLUDED_BY, EXCLUSION_REASON = "excluded_by", "exclusion_reason"
