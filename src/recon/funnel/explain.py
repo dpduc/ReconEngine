@@ -82,12 +82,30 @@ def _batch_mismatch(row: Row) -> str:
             + "; every order in the batch is reviewed.")
 
 
+def _credits(row: Row) -> str:
+    """'The bank credit', or 'The total of the 2 bank credits (A, B)' for a split payment."""
+    refs = str(_value(row, "txn_ref") or "").split("|")
+    return "The bank credit" if len(refs) < 2 else f"The total of the {len(refs)} bank credits ({', '.join(refs)})"
+
+
+def _duplicate_payment(row: Row) -> str:
+    return (_difference(_credits(row), _value(row, "credit_delta"), "expected").rstrip(".")
+            + ", and one of them alone pays the order: a duplicate payment.")
+
+
+def _tie_out(row: Row) -> str:
+    refs = str(_value(row, "txn_ref") or "").split("|")
+    if len(refs) < 2:
+        return "Order, bank credit and shipment tie out."
+    return f"Order, bank credits ({', '.join(refs)}: paid in {len(refs)} parts) and shipment tie out."
+
+
 def _amount_mismatch(row: Row) -> str:
     if _remitted(row):
         return _difference("The COD collected", _value(row, "cod_amount_delta"), "the order amount")
     if _value(row, "settlement_feed"):
         return _line_amount(row)
-    sentence = _difference("The bank credit", _value(row, "credit_delta"), "expected")
+    sentence = _difference(_credits(row), _value(row, "credit_delta"), "expected")
     cod_delta = _value(row, "cod_amount_delta")
     if row.get("payment_method") == "COD" and cod_delta:
         sentence += " " + _difference("The COD collected", cod_delta, "the order amount")
@@ -153,7 +171,7 @@ def _candidates(row: Row) -> str:
 
 
 SENTENCES: dict[str, Callable[[Row], str]] = {
-    "THREE_WAY_TIE_OUT": lambda row: "Order, bank credit and shipment tie out.",
+    "THREE_WAY_TIE_OUT": _tie_out,
     "TIE_OUT_PER_STATUS_POLICY": lambda row: (
         f"The order ties out on the evidence its status {_status(row)} requires."),
     "MISSING_SOURCE_EVIDENCE": lambda row: (
@@ -175,6 +193,7 @@ SENTENCES: dict[str, Callable[[Row], str]] = {
     "POSSIBLE_INSTALLMENT_INTEREST": _possible_interest,
     "FX_DIFFERENCE": _fx_difference,
     "AMOUNT_MISMATCH": _amount_mismatch,
+    "DUPLICATE_PAYMENT": _duplicate_payment,
     "MISSING_SHIPMENT": lambda row: "No shipment found for this order.",
     "FEE_MISMATCH": lambda row: (_line_fees(row) if _value(row, "settlement_feed")
                                  else _difference("The bank fee", _value(row, "fee_delta"), _fee_rate(row))),
@@ -201,7 +220,7 @@ COLUMNS = ("reason_codes", "confidence", "payment_method", "order_status", "cred
            "expected_credit", "fx_rate", "fx_rate_source", "fx_rate_date", "fx_converted", "fx_rate_missing",
            "installments", "installments_bank", "settlement_feed", "settlement_payout_id", "settlement_refund",
            "settlement_gross_delta", "settlement_fee_delta", "settlement_fee_bps", "batch_tie_out_delta",
-           "batch_kind", "batch_id", "tracking_code", "shipment_returned")
+           "batch_kind", "batch_id", "tracking_code", "shipment_returned", "txn_ref")
 
 
 def explain_all(frame: pd.DataFrame) -> list[str]:

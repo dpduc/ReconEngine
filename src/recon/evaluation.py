@@ -95,8 +95,10 @@ def _predicted_links(results: pd.DataFrame) -> pd.DataFrame:
         linked = results[results["remittance_txn_ref"].notna() & results["remittance_txn_ref"].ne(results["txn_ref"])]
         frames.append(pd.DataFrame({"feed": "bank", "record_key": linked["remittance_txn_ref"].astype(str),
                                     "order_id": linked["order_id"].astype(str), "link_pass": "remittance"}))
-    return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=["feed", "record_key", "order_id",
-                                                                                      "link_pass"])
+    if not frames:
+        return pd.DataFrame(columns=["feed", "record_key", "order_id", "link_pass"])
+    links = pd.concat(frames, ignore_index=True)  # a split payment links each of its credits
+    return links.assign(record_key=links["record_key"].str.split("|")).explode("record_key", ignore_index=True)
 
 
 def _candidate_metrics(results: pd.DataFrame, true_bank: set[tuple[str, str]]) -> dict[str, Any]:

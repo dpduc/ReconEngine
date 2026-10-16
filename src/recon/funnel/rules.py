@@ -13,6 +13,7 @@ import pandas as pd
 from recon.contracts import fee
 from recon.funnel.base import FunnelContext, FunnelStep, StepOutcome, cod_remittance, decide, split
 from recon.funnel.fx import lookup_rates
+from recon.funnel.linking import SPLIT_AMOUNTS
 from recon.funnel.reasons import exception
 from recon.schema import CURRENCY, INSTALLMENTS, INTEREST_AMOUNT, PAYMENT_TYPE, REVIEW
 
@@ -48,6 +49,7 @@ def _measure(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
         ~out["payment_method"].eq("COD") | (within(out["cod_amount_delta"], policy.amount_tolerance))
     )
     out["fee_within_tolerance"] = within(out["fee_delta"], policy.amount_tolerance)
+    out["duplicate_payment"] = _duplicate_payment(out, policy.amount_tolerance)
     out["cod_fee_within_tolerance"] = within(out["cod_fee_delta"], policy.amount_tolerance)
     _installment_interest(out, policy)
     out["fx_within_tolerance"] = out["fx_converted"] & (
@@ -61,6 +63,17 @@ def _measure(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     # A unit reaching the decision passed every check; a linked shipment must also agree on tracking number.
     out["tracking_consistent"] = ~out["shipment_found"] | out["tracking_exact"]
     return out
+
+
+def _duplicate_payment(out: pd.DataFrame, tolerance: float) -> pd.Series:
+    """True for units paid in several credits, together more than expected, one of which alone pays it."""
+    if SPLIT_AMOUNTS not in out:
+        return pd.Series(False, index=out.index)
+    parts = out[SPLIT_AMOUNTS].map(lambda listed: [float(a) for a in str(listed).split("|")]
+                                   if isinstance(listed, str) else [])
+    one_pays = [any(abs(a - expected) <= tolerance + 1e-9 for a in amounts)
+                for amounts, expected in zip(parts, out["expected_credit"])]
+    return pd.Series(one_pays, index=out.index) & (out["credit_delta"] > tolerance + 1e-9)
 
 
 def _fee_bps(out: pd.DataFrame, ctx: FunnelContext) -> list[int]:
@@ -158,6 +171,7 @@ def possible_installment_interest(units: pd.DataFrame, ctx: FunnelContext) -> St
 RULE_STEPS: list[FunnelStep] = [
     FunnelStep("missing_payment", _rule("MISSING_PAYMENT", lambda u: u["requires_payment"] & ~u["bank_found"])),
     FunnelStep("currency_mismatch", _rule("CURRENCY_MISMATCH", lambda u: u["bank_found"] & ~u["currency_ok"])),
+    FunnelStep("duplicate_payment", _rule("DUPLICATE_PAYMENT", lambda u: u["bank_found"] & u["duplicate_payment"])),
     FunnelStep("fx_difference", _rule("FX_DIFFERENCE", lambda u: u["bank_found"] & ~u["amount_within_tolerance"]
                                       & u["fx_within_tolerance"])),
     FunnelStep("amount_mismatch", _rule("AMOUNT_MISMATCH", lambda u: u["bank_found"] & ~u["amount_within_tolerance"]

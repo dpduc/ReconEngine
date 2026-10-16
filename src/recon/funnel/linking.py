@@ -2,6 +2,10 @@
 
 Passes 1 and 2 only enrich; pass 3 (`link_candidates`) sends units with ambiguous or
 loose bank candidates to REVIEW.
+
+An order paid in several credits (a split payment) links to the group, compared as a total:
+in pass 1 the credits naming the same order, in pass 2 the customer's own credits that together
+pay it (see `group_credits`).
 """
 
 from __future__ import annotations
@@ -13,11 +17,14 @@ from typing import Any
 import pandas as pd
 
 from recon.funnel.base import FunnelContext, StepOutcome, cod_remittance, decide, lineage_prefixed, pass_on
-from recon.schema import CURRENCY, CUSTOMER_NAME, ORDER_REF_COLUMNS, PAYER_NAME, REVIEW
+from recon.schema import CURRENCY, CUSTOMER_NAME, INTEREST_AMOUNT, ORDER_REF_COLUMNS, PAYER_NAME, REVIEW
 
 ORDER_REF = re.compile(r"(ORD\d{4}-\d{7}|[0-9a-f]{32})", re.IGNORECASE)
 CANDIDATE_MAX_SCORE = 0.5  # pass 3 scores stay well below any accept threshold
 CANDIDATE_ROWS = "bank_candidate_rows"  # '|'-joined bank source rows listed as pass 3 candidates
+# On a unit paid in several credits: each credit's source row and amount, '|'-joined like its txn_ref.
+SPLIT_ROWS, SPLIT_AMOUNTS = "bank_split_rows", "bank_split_amounts"
+SPLIT_PASS = "constrained_split"
 
 
 def _reference(match: re.Match) -> str:
@@ -61,9 +68,51 @@ def link_one_to_one(units: pd.DataFrame, all_keys: pd.Series, other: pd.DataFram
     return out.drop(columns=["_link_key", "_linked"])
 
 
+def group_credits(bank: pd.DataFrame, groups: list[list]) -> pd.DataFrame:
+    """One row per group of `bank` rows (index labels) that pay one order together, under new labels.
+
+    Amounts are summed; `txn_ref`, the row hash and SPLIT_ROWS / SPLIT_AMOUNTS list every credit,
+    '|'-joined in source order; the other columns are the last credit's.
+    """
+    start = int(bank.index.max()) + 1 if len(bank) else 0
+    rows = []
+    for labels in groups:
+        part = bank.loc[labels].sort_values("bank_source_row")
+        row = part.iloc[-1].copy()
+        for column in ("credit_amount", "fee_amount", "net_amount", INTEREST_AMOUNT):
+            if column in part:
+                row[column] = part[column].sum(min_count=1)
+        row["txn_ref"] = "|".join(part["txn_ref"].astype(str))
+        row["bank_row_hash"] = "|".join(part["bank_row_hash"].astype(str))
+        row[SPLIT_ROWS] = "|".join(str(int(r)) for r in part["bank_source_row"])
+        row[SPLIT_AMOUNTS] = "|".join(f"{a:.2f}" for a in part["credit_amount"].fillna(0))
+        rows.append(row)
+    return pd.DataFrame(rows, columns=[*bank.columns, SPLIT_ROWS, SPLIT_AMOUNTS],
+                        index=range(start, start + len(rows)))
+
+
+def _reference_groups(bank: pd.DataFrame) -> pd.DataFrame:
+    """`bank` with the credits that name the same order replaced by their group (pass 1 splits)."""
+    refs = bank[ORDER_REF_COLUMNS["bank"]]
+    shared = refs.notna() & refs.duplicated(keep=False)
+    if not shared.any():
+        return bank
+    groups = [list(group.index) for _, group in bank[shared].groupby(refs[shared], sort=True)]
+    return pd.concat([bank[~shared], group_credits(bank, groups)])
+
+
+def linked_bank_rows(frame: pd.DataFrame) -> set[int]:
+    """The bank source rows units carry: each linked credit, every part of a split payment included."""
+    rows = {int(r) for r in frame["bank_source_row"].dropna()} if "bank_source_row" in frame else set()
+    if SPLIT_ROWS in frame:
+        rows |= {int(r) for parts in frame[SPLIT_ROWS].dropna() for r in str(parts).split("|")}
+    return rows
+
+
 def attach_exact(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
-    """`units` enriched with the bank and logistics records naming them (one-to-one only)."""
-    bank = bank_frame(ctx)
+    """`units` enriched with the bank and logistics records naming them (one-to-one, or the group of
+    credits naming the same order)."""
+    bank = _reference_groups(bank_frame(ctx))
     logistics = lineage_prefixed(ctx.feeds["logistics"], "logistics")
     order_id, orders = ORDER_REF_COLUMNS["oms"], ctx.feeds["oms"][ORDER_REF_COLUMNS["oms"]].dropna()
     linked = link_one_to_one(units, orders, bank, order_id, ORDER_REF_COLUMNS["bank"], ("_oms", "_bank"),
@@ -94,19 +143,18 @@ def _day(ctx: FunnelContext, feed: str, values: pd.Series) -> pd.Series:
     return ctx.dates(feed, values, utc=True).dt.normalize()
 
 
-def _candidate_pairs(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
-    """(unit_id, bank row) pairs for bank-unlinked units against unclaimed bank rows.
-
-    Pairs share a currency (when both feeds carry one) and have the credit within the
-    amount tolerance of the expected credit; `day_gap` is |value date - order date|.
-    """
+def _free_bank(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
+    """The bank rows free to link by amount: not linked to a unit, not naming a settlement batch, and
+    not naming a known order (possibly decided upstream)."""
     bank = bank_frame(ctx)
-    # Rows already linked, naming a payout, or whose reference names a known order (possibly decided
-    # upstream), are not free.
-    claimed = bank["bank_source_row"].isin(units["bank_source_row"].dropna()) | bank["bank_source_row"].isin(
+    claimed = bank["bank_source_row"].isin(linked_bank_rows(units)) | bank["bank_source_row"].isin(
         ctx.payout_credit_rows)
     names_order = bank[ORDER_REF_COLUMNS["bank"]].isin(ctx.feeds["oms"][ORDER_REF_COLUMNS["oms"]].dropna())
-    bank = bank[~claimed & ~names_order]
+    return bank[~claimed & ~names_order]
+
+
+def _sides(units: pd.DataFrame, bank: pd.DataFrame, ctx: FunnelContext) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """(bank-unlinked units, `bank` rows), each with `_currency` and its day, for matching by amount."""
     open_units = units[units["bank_link_pass"].isna()]
     both_currency = all(CURRENCY in ctx.feeds[f].columns for f in ("oms", "bank"))
     oms_currency = f"{CURRENCY}_oms" if both_currency else None
@@ -118,6 +166,16 @@ def _candidate_pairs(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
                          "_expected": expected, "_day": _day(ctx, "oms", open_units["ordered_at"])})
     right = pd.DataFrame({"bank_pos": bank.index, "_currency": _currency(bank, CURRENCY if both_currency else None),
                           "_credit": bank["credit_amount"], "_value_day": _day(ctx, "bank", bank["value_date"])})
+    return left, right
+
+
+def _candidate_pairs(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
+    """(unit_id, bank row) pairs for bank-unlinked units against unclaimed bank rows.
+
+    Pairs share a currency (when both feeds carry one) and have the credit within the
+    amount tolerance of the expected credit; `day_gap` is |value date - order date|.
+    """
+    left, right = _sides(units, _free_bank(units, ctx), ctx)
     pairs = left.merge(right, on="_currency")
     pairs = pairs[(pairs["_credit"] - pairs["_expected"]).abs() <= ctx.policy.amount_tolerance]
     pairs = pairs.assign(day_gap=(pairs["_value_day"] - pairs["_day"]).dt.days.abs())
@@ -176,7 +234,33 @@ def link_constrained(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
     pairs = pairs[~_payer_differs(pairs, units, bank_frame(ctx), ctx)]
     unique = ~pairs["unit_id"].duplicated(keep=False) & ~pairs["bank_pos"].duplicated(keep=False)
     linked = attach_bank(units, bank_frame(ctx), pairs[unique], "constrained")
-    return pass_on(linked)
+    return pass_on(_link_payer_splits(linked, ctx))
+
+
+def _link_payer_splits(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
+    """Pass 2 for split payments: a bank-unlinked order is linked to its customer's credits when every
+    free credit from a payer of that name, of the same currency and within the date window, together
+    pays the expected amount (two credits or more), and no other open order has them in its window."""
+    bank = bank_frame(ctx)
+    payers = payer_names(bank, ctx.policy.payer_pattern)
+    if payers is None or CUSTOMER_NAME not in units.columns:
+        return units
+    left, right = _sides(units, _free_bank(units, ctx), ctx)
+    left["_name"] = left["unit_id"].map(units.set_index("unit_id")[CUSTOMER_NAME]).map(normalize_name)
+    right["_name"] = payers.loc[right["bank_pos"]].map(normalize_name).to_numpy()
+    pairs = left[left["_name"].ne("")].merge(right, on=["_currency", "_name"])
+    pairs = pairs[(pairs["_value_day"] - pairs["_day"]).dt.days.abs() <= ctx.policy.link_date_window_days]
+    pairs = pairs[~pairs["bank_pos"].duplicated(keep=False)]  # credits in one open order's window only
+    totals = pairs.groupby("unit_id").agg(parts=("bank_pos", "size"), paid=("_credit", "sum"),
+                                          expected=("_expected", "first"))
+    paid = totals[(totals["parts"] >= 2) & ((totals["paid"] - totals["expected"]).abs()
+                                            <= ctx.policy.amount_tolerance + 1e-9)]
+    if paid.empty:
+        return units
+    by_unit = pairs[pairs["unit_id"].isin(paid.index)].groupby("unit_id")["bank_pos"].agg(list)
+    groups = group_credits(bank, list(by_unit))
+    links = pd.DataFrame({"unit_id": by_unit.index, "bank_pos": groups.index})
+    return attach_bank(units, pd.concat([bank, groups]), links, SPLIT_PASS)
 
 
 def link_candidates(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:

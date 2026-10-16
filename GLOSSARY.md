@@ -34,6 +34,14 @@ _Avoid_: settlement row, escrow line
 A settlement batch from a carrier: the COD it collected, less shipping and COD fees.
 _Avoid_: COD payout
 
+**Split payment**:
+One order paid in several bank credits, such as a deposit and the rest; the credits are compared as a total.
+_Avoid_: partial payment (for a credit that is simply short)
+
+**Duplicate payment**:
+Several bank credits for one order, one of which alone pays it.
+_Avoid_: double charge
+
 **Orphan**:
 A bank credit, settlement line or shipment that no order claims.
 _Avoid_: unmatched record

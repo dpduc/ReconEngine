@@ -18,7 +18,7 @@ from recon.ingest import parse_dates
 from recon.schema import INGESTED_AT, LINEAGE_COLUMNS
 from recon.timing import StageTimer
 
-RULE_VERSION = "1.8.0"  # bump whenever funnel logic changes
+RULE_VERSION = "1.9.0"  # bump whenever funnel logic changes
 
 HASH_COLUMNS = ("oms_row_hash", "bank_row_hash", "logistics_row_hash", "settlement_row_hash")
 
