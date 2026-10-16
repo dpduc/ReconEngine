@@ -52,7 +52,9 @@ BATCH_DECISIONS = {TIE_OUT: AUTO_ACCEPT, "MISSING_PAYMENT": EXCEPTION, BATCH_MIS
                    CREDIT_AMBIGUOUS: REVIEW}
 BATCH_COLUMNS = ("settlement_feed", "channel", "payout_id", "lines", "gross", "fees", "refund", "net",
                  "txn_ref", "bank_source_row", "credit_amount", "tie_out_delta", "decision", "reason_codes",
-                 "explanation")
+                 "explanation",
+                 # a payout without a report (funnel.payout_search): its candidate orders and order sets, and why
+                 "candidate_orders", "candidate_sets", "search")
 
 
 def payout_credits(bank: pd.DataFrame, payout_ids) -> pd.DataFrame:
@@ -72,7 +74,8 @@ def _report_channels(marketplaces: dict[str, Channel]) -> dict[str, tuple[str, C
     """Settlement feed -> (the first channel settled by it, that channel)."""
     out: dict[str, tuple[str, Channel]] = {}
     for name, channel in marketplaces.items():
-        out.setdefault(channel.settlement, (name, channel))
+        if channel.settlement:
+            out.setdefault(channel.settlement, (name, channel))
     return out
 
 
@@ -204,7 +207,8 @@ def settle_marketplace(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
     if not ctx.marketplaces or CHANNEL not in units:
         return pass_on(units)
     channels = units[CHANNEL].fillna("").astype(str).str.strip()
-    market, remaining = split(units, channels.isin(list(ctx.marketplaces)))
+    reported = [name for name, channel in ctx.marketplaces.items() if channel.settlement]
+    market, remaining = split(units, channels.isin(reported))
     if market.empty:
         return pass_on(units)
     market = attach_exact(market, ctx)

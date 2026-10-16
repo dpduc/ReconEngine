@@ -83,6 +83,7 @@ A run config is a JSON file (or YAML, if PyYAML is installed) with these parts:
 - `channels`: optional. Each OMS `channel` value names its money chain. Without channels, every order is on one prepaid chain with the default pattern. When channels are declared, orders of an undeclared channel are a Health warning.
   - `prepaid`: optionally, the `order_ref_pattern` that finds its orders in a bank description (named group `ref`, e.g. `"DON (?P<ref>#\\d+)"`).
   - `marketplace`: `settlement` names the channel's settlement report. An order links to its line by the OMS `channel_order_no`, and the line's payout to the bank credit whose description (or `payout_id` column) names it. `fee_bps` is the channel's total fee on a line's gross (unset: fees are not checked). A line's gross is compared with the OMS `item_total` when mapped, else with `order_amount`. `amount_tolerance` overrides the policy's for the channel's checks.
+    - Without its report, a marketplace channel names `payout_pattern` instead: a regex that finds its payout credits in bank descriptions (named group `payout`). See [Payouts without a settlement report](#payouts-without-a-settlement-report).
   - `cod_remittances` (any chain): the channel's COD orders are paid by carrier remittances. An order links to its shipment by order reference, and the shipment's `remittance_id` (a logistics column) to the bank credit whose description names it. A shipment whose logistics `status` is `RETURNED` collected nothing. The COD fee is checked against the policy's `cod_fee_bps`. Without it, each COD order is paid by a credit of its own.
   - Payment terms (any chain), for a run with a `period`: `release_days` and `payout_weekdays` (0 = Monday) say when a delivered COD or marketplace order's money is due, `settlement_days` when one with no shipment record is, and `ship_days` when a shipment is due. A prepaid order's money is due on its order date. See [Periods and open items](#periods-and-open-items).
 - `mapping`: canonical column → source column, for each feed.
@@ -163,21 +164,44 @@ missing shipments.
 | 1 | `missing_source_evidence` | `MISSING_SOURCE_EVIDENCE`: no order amount |
 | 2 | `status_policy` | `ORDER_STATUS_REQUIRES_POLICY`: a status the policy doesn't cover |
 | 3 | `settle_marketplace` | every order of a marketplace channel, along its chain: `MISSING_PAYMENT` (no line, or no credit for its payout) → `AMOUNT_MISMATCH` (refund, or gross off the order) → `FEE_MISMATCH` (fees off the channel's terms) → REVIEW `SETTLEMENT_BATCH_MISMATCH` (the payout credit differs from its lines' net) → `AUTO_ACCEPT` `SETTLEMENT_TIE_OUT` |
-| 4 | `settle_cod` | every COD order of a `cod_remittances` channel, along its chain: `MISSING_SHIPMENT` → `MISSING_PAYMENT` (returned, on no remittance yet, or no credit for its remittance) → `AMOUNT_MISMATCH` (COD collected off the order) → `COD_FEE_MISMATCH` → REVIEW `SETTLEMENT_BATCH_MISMATCH` (the remittance credit differs from its shipments' COD less fees) → `AUTO_ACCEPT` `REMITTANCE_TIE_OUT` |
-| 5 | `link_exact` | links one-to-one on references (structured `order_ref`, or extracted from the bank description). Several credits naming the same order link as one split payment, compared as their total |
-| 6 | `link_constrained` | links on same currency, amount within tolerance and date within the window, skipping payout and remittance credits. Never auto-matches when several candidates qualify, and never links a credit from a different payer than the order's customer. An order whose customer paid in several credits links to them as a split payment (`constrained_split`) when every free credit from that payer within the window together pays it, and no other open order of the customer has them in its window |
-| 7 | `link_candidates` | REVIEW with `LINK_CANDIDATES`: proposes candidates with a confidence score, never auto-accepted |
-| 8 | `route_review` | REVIEW: duplicate keys whose strategy is "route to review" |
-| 9 | rule checks | `MISSING_PAYMENT` → `CURRENCY_MISMATCH` → `DUPLICATE_PAYMENT` (several credits, one of which alone pays the order) → `FX_DIFFERENCE` → `AMOUNT_MISMATCH` → `MISSING_SHIPMENT` → fee / COD fee → `TIMING_MISMATCH` → `POSSIBLE_INSTALLMENT_INTEREST` (REVIEW) |
-| 10 | `decision` | `AUTO_ACCEPT` (`INSTALLMENT_INTEREST` when the stated interest explains the delta) |
-| 11 | `reverse_pass` | `ORPHAN_PAYMENT` / `ORPHAN_SHIPMENT`: bank or 3PL records that link to no order (payout and remittance credits, and the shipments on a remittance, are reported on their settlement batch instead) |
+| 4 | `settle_reportless` | every order of a marketplace channel without a settlement report: REVIEW `SETTLEMENT_REPORT_MISSING` with the payouts that may include it, never `AUTO_ACCEPT` (missing money when none can) |
+| 5 | `settle_cod` | every COD order of a `cod_remittances` channel, along its chain: `MISSING_SHIPMENT` → `MISSING_PAYMENT` (returned, on no remittance yet, or no credit for its remittance) → `AMOUNT_MISMATCH` (COD collected off the order) → `COD_FEE_MISMATCH` → REVIEW `SETTLEMENT_BATCH_MISMATCH` (the remittance credit differs from its shipments' COD less fees) → `AUTO_ACCEPT` `REMITTANCE_TIE_OUT` |
+| 6 | `link_exact` | links one-to-one on references (structured `order_ref`, or extracted from the bank description). Several credits naming the same order link as one split payment, compared as their total |
+| 7 | `link_constrained` | links on same currency, amount within tolerance and date within the window, skipping payout and remittance credits. Never auto-matches when several candidates qualify, and never links a credit from a different payer than the order's customer. An order whose customer paid in several credits links to them as a split payment (`constrained_split`) when every free credit from that payer within the window together pays it, and no other open order of the customer has them in its window |
+| 8 | `link_candidates` | REVIEW with `LINK_CANDIDATES`: proposes candidates with a confidence score, never auto-accepted |
+| 9 | `route_review` | REVIEW: duplicate keys whose strategy is "route to review" |
+| 10 | rule checks | `MISSING_PAYMENT` → `CURRENCY_MISMATCH` → `DUPLICATE_PAYMENT` (several credits, one of which alone pays the order) → `FX_DIFFERENCE` → `AMOUNT_MISMATCH` → `MISSING_SHIPMENT` → fee / COD fee → `TIMING_MISMATCH` → `POSSIBLE_INSTALLMENT_INTEREST` (REVIEW) |
+| 11 | `decision` | `AUTO_ACCEPT` (`INSTALLMENT_INTEREST` when the stated interest explains the delta) |
+| 12 | `reverse_pass` | `ORPHAN_PAYMENT` / `ORPHAN_SHIPMENT`: bank or 3PL records that link to no order (payout and remittance credits, and the shipments on a remittance, are reported on their settlement batch instead) |
 
 Each unit gets one reason code (the first check it fails) and a plain-language
 explanation. A problem on a marketplace order's own line, or a COD order's own shipment, is reported on that order even
 when its batch is also off.
 Each settlement batch gets its own result (`BATCH_TIE_OUT`, `MISSING_PAYMENT`, `SETTLEMENT_BATCH_MISMATCH`,
-`PAYOUT_CREDIT_AMBIGUOUS`, or OPEN `NOT_YET_DUE` when none of its orders is due yet), with the orders of the run among its lines and those that are exceptions. It also records the step that decided it, the rule version and the
+`PAYOUT_CREDIT_AMBIGUOUS`, OPEN `NOT_YET_DUE` when none of its orders is due yet, or REVIEW `SETTLEMENT_REPORT_MISSING`), with the orders of the run among its lines and those that are exceptions. It also records the step that decided it, the rule version and the
 hashes of the input rows behind it.
+
+### Payouts without a settlement report
+
+Without its settlement report, a payout credit can only be matched to orders by amount: an order's expected net is
+its gross less the channel's `fee_bps`. Beyond a handful of orders, a great many order sets add up to the same
+credit. On VN set B with its reports removed, payouts hold 34–226 orders from pools of 125–381, and no search can
+tell the true set apart. So:
+
+- **Payout credits:** each is a batch in REVIEW `SETTLEMENT_REPORT_MISSING`, listing its candidate orders (the
+  channel's orders placed in the `settlement_days` before it, 45 without). A pool of at most 25 orders is searched
+  for the order sets whose net adds up to the credit, within a step and time limit. The batch lists them when there
+  are at most 3; otherwise `search` says why not (too many orders, too many sets, no set, or the bound).
+- **Orders:** each is REVIEW, listing the payouts that may include it. The best-scored payout is the one nearest the
+  day its money is expected (order date + the run's median days to delivery + the channel's `release_days`). An order
+  no payout can include is missing money (OPEN while not yet due). Nothing is auto-accepted, and the payout credits
+  are never linked by amount or reported as orphans.
+- **Channel tie-out:** the manifest's `channel_tie_outs` compare the channel's payout credits with the expected net of
+  the orders they may include. The difference also holds money for orders outside the run (last month's).
+
+On VN set B with its reports removed, every order's true payout is among its candidates, and the top one is right for
+40% of orders (51–65% on the other sets). No payout's true order set is found: the pools are too big, or the payout
+also pays last month's orders. Loading the report remains the fix; the REVIEW says so.
 
 ### Periods and open items
 
@@ -303,5 +327,5 @@ tests of the wizard. The benchmark tests need `data/generated/`; see Quick start
 
 - **Exception resolution actions:** force match, write-off and refund, with an audit log.
 - **Infrastructure:** PostgreSQL sources, and dedup across repeated ingests of the same file.
-- **Matching beyond one-to-one:** batches without a settlement report.
+- **Matching beyond one-to-one:** telling a payout's true orders apart without its settlement report (see [Payouts without a settlement report](#payouts-without-a-settlement-report)).
 - **Packaging:** Docker.

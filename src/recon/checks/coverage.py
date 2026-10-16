@@ -7,6 +7,8 @@ record; a bank credit naming a payout or a remittance is not missing an order.
 
 from __future__ import annotations
 
+import re
+
 import pandas as pd
 
 from recon.checks import register, warning
@@ -31,25 +33,44 @@ def _order_refs(feeds: dict[str, pd.DataFrame], config: RunConfig) -> dict[str, 
     return refs
 
 
+def _paid_elsewhere(oms: pd.DataFrame, config: RunConfig) -> pd.Series:
+    """Orders paid through a batch (a marketplace's payouts, a COD channel's remittances), not by a credit
+    naming them."""
+    if CHANNEL not in oms.columns:
+        return pd.Series(False, index=oms.index)
+    channels = oms[CHANNEL].fillna("").astype(str).str.strip()
+    paid = channels.isin(list(config.marketplaces))
+    if config.cod_channels and "payment_method" in oms.columns:
+        paid |= channels.isin(list(config.cod_channels)) & oms["payment_method"].eq("COD")
+    return paid
+
+
+def _batch_credits(feeds: dict[str, pd.DataFrame], config: RunConfig) -> set:
+    """Bank rows naming a payout or remittance, or read as a payout by a channel's `payout_pattern`."""
+    bank = feeds.get("bank")
+    if bank is None or "description" not in bank.columns:
+        return set()
+    reports = [feeds[c.settlement] for c in config.marketplaces.values() if c.settlement in feeds]
+    ids = {i for frame in reports if PAYOUT_ID in frame.columns for i in frame[PAYOUT_ID].dropna()}
+    shipments = feeds.get("logistics")
+    if config.cod_channels and shipments is not None and REMITTANCE_ID in shipments.columns:
+        ids |= set(shipments[REMITTANCE_ID].dropna().astype(str))
+    credits = set(payout_credits(bank, ids)["bank_pos"]) if ids else set()
+    patterns = [re.compile(c.payout_pattern) for c in config.marketplaces.values()
+                if c.payout_pattern and not c.settlement]
+    if patterns:
+        descriptions = bank["description"].astype(str)
+        credits |= {pos for pos, text in descriptions.items() if any(p.search(text) for p in patterns)}
+    return credits
+
+
 @register
 def coverage(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Issue]:
     refs = _order_refs(feeds, config)
     if "oms" not in refs:
         return []
-    orders = set(refs["oms"].dropna())
-    oms, paid_elsewhere, ids, payouts = feeds["oms"], pd.Series(False, index=refs["oms"].index), set(), set()
-    channels = oms[CHANNEL].fillna("").astype(str).str.strip() if CHANNEL in oms.columns else None
-    if config.marketplaces and channels is not None:
-        paid_elsewhere = channels.isin(list(config.marketplaces))
-        reports = [feeds[c.settlement] for c in config.marketplaces.values() if c.settlement in feeds]
-        ids = {i for frame in reports if PAYOUT_ID in frame.columns for i in frame[PAYOUT_ID].dropna()}
-    if config.cod_channels and channels is not None and "payment_method" in oms.columns:
-        paid_elsewhere = paid_elsewhere | (channels.isin(list(config.cod_channels)) & oms["payment_method"].eq("COD"))
-        shipments = feeds.get("logistics")
-        if shipments is not None and REMITTANCE_ID in shipments.columns:
-            ids |= set(shipments[REMITTANCE_ID].dropna().astype(str))
-    if ids and "bank" in refs and "description" in feeds["bank"].columns:
-        payouts = set(payout_credits(feeds["bank"], ids)["bank_pos"])
+    orders, oms = set(refs["oms"].dropna()), feeds["oms"]
+    paid_elsewhere, batch_credits = _paid_elsewhere(oms, config), _batch_credits(feeds, config)
     issues = []
     for feed, gap in (("bank", "no_payment"), ("logistics", "no_shipment")):
         if feed not in refs:
@@ -62,7 +83,7 @@ def coverage(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list[Issue]:
                                   f"oms: {int(mask.sum())} orders have no {feed} record"))
         orphan = ~refs[feed].isin(orders)
         if feed == "bank":
-            orphan &= ~refs[feed].index.isin(list(payouts))
+            orphan &= ~refs[feed].index.isin(list(batch_credits))
         if orphan.any():
             issues.append(warning(f"coverage:{feed}:no_order", "coverage", feed, feeds[feed], orphan,
                                   f"{feed}: {int(orphan.sum())} records match no order"))

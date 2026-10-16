@@ -34,6 +34,10 @@ _Avoid_: settlement row, escrow line
 A settlement batch from a carrier: the COD it collected, less shipping and COD fees.
 _Avoid_: COD payout
 
+**Channel tie-out**:
+A channel's payout credits in a period compared with the expected net of its orders, when its settlement report is missing.
+_Avoid_: channel reconciliation, control total
+
 **Split payment**:
 One order paid in several bank credits, such as a deposit and the rest; the credits are compared as a total.
 _Avoid_: partial payment (for a credit that is simply short)

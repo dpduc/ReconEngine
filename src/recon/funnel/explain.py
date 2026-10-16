@@ -90,6 +90,14 @@ def _missing_money(row: Row) -> str:
     return f"Payout {payout} in {_report(row)} pays this order, but no bank credit names it."
 
 
+def _report_missing(row: Row) -> str:
+    listed = str(_value(row, "payout_candidates") or "").split("|")
+    refs = ", ".join(item.rsplit(":", 1)[0] for item in listed if item)
+    return (f"No settlement report for {_value(row, 'channel')}, so its payouts can only be matched by amount: "
+            f"{len(listed)} payout credit(s) may include this order ({refs}). A reviewer matches it, or loads "
+            "the report.")
+
+
 def _batch_mismatch(row: Row) -> str:
     return (_difference(f"The bank credit for {_batch(row)}", _value(row, "batch_tie_out_delta"),
                         "the net of its lines").rstrip(".")
@@ -201,6 +209,7 @@ SENTENCES: dict[str, Callable[[Row], str]] = {
         f"Shipment {_value(row, 'tracking_code')} collected the order amount, and remittance "
         f"{_value(row, 'batch_id')} ties out against its bank credit."),
     "SETTLEMENT_BATCH_MISMATCH": _batch_mismatch,
+    "SETTLEMENT_REPORT_MISSING": _report_missing,
     "PAYOUT_CREDIT_AMBIGUOUS": lambda row: (
         f"Several bank credits name {_batch(row)}; a reviewer picks the one that pays it."),
     "CURRENCY_MISMATCH": _currency_mismatch,
@@ -236,7 +245,8 @@ COLUMNS = ("reason_codes", "confidence", "payment_method", "order_status", "cred
            "expected_credit", "fx_rate", "fx_rate_source", "fx_rate_date", "fx_converted", "fx_rate_missing",
            "installments", "installments_bank", "settlement_feed", "settlement_payout_id", "settlement_refund",
            "settlement_gross_delta", "settlement_fee_delta", "settlement_fee_bps", "batch_tie_out_delta",
-           "batch_kind", "batch_id", "tracking_code", "shipment_returned", "txn_ref", "due_date", "cutoff", "waiting_for")
+           "batch_kind", "batch_id", "tracking_code", "shipment_returned", "txn_ref", "due_date", "cutoff", "waiting_for", "channel",
+           "payout_candidates")
 
 
 def explain_all(frame: pd.DataFrame) -> list[str]:

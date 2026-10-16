@@ -112,7 +112,10 @@ class Channel:
                  None: the default pattern.
     marketplace  order ──channel order no──▶ settlement line ──payout id──▶ bank credit.
                  `settlement` names the settlement report feed; `fee_bps` is the channel's total
-                 fee on a line's gross (None: fees are not checked).
+                 fee on a line's gross (None: fees are not checked). Without a report,
+                 `payout_pattern` finds the channel's payout credits in bank descriptions (named
+                 group `payout`: the payout id, else the whole match); they can only be matched to
+                 orders by amount, so they and the channel's orders go to REVIEW.
     COD          `cod_remittances`: the channel's COD orders are paid by carrier remittances,
                  order ──order ref──▶ shipment ──remittance id──▶ bank credit (any chain; False:
                  each COD order is paid by a credit of its own).
@@ -136,6 +139,7 @@ class Channel:
     payout_weekdays: tuple[int, ...] = ()
     settlement_days: int | None = None
     ship_days: int | None = None
+    payout_pattern: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "payout_weekdays", tuple(int(d) for d in self.payout_weekdays))
@@ -145,9 +149,14 @@ class Channel:
             raise ValueError(f"unknown money chain {self.chain!r}; expected one of {', '.join(CHAINS)}")
         if self.order_ref_pattern is not None:
             re.compile(self.order_ref_pattern)
-        if (self.chain == MARKETPLACE) != (self.settlement is not None):
-            raise ValueError("a marketplace channel names its settlement report (settlement); "
-                             "other chains have none")
+        if self.payout_pattern is not None:
+            re.compile(self.payout_pattern)
+        if self.chain == MARKETPLACE and self.settlement is None and self.payout_pattern is None:
+            raise ValueError("a marketplace channel names its settlement report (settlement), or how its "
+                             "payout credits read without one (payout_pattern)")
+        if self.chain != MARKETPLACE and (self.settlement is not None or self.payout_pattern is not None):
+            raise ValueError("only a marketplace channel names a settlement report (settlement) or a "
+                             "payout_pattern; other chains have none")
 
     def tolerance(self, policy: Policy) -> float:
         return policy.amount_tolerance if self.amount_tolerance is None else self.amount_tolerance
@@ -222,6 +231,11 @@ class RunConfig:
     def marketplaces(self) -> dict[str, Channel]:
         """The channels on the marketplace chain, by OMS channel value."""
         return {name: c for name, c in self.channels.items() if c.chain == MARKETPLACE}
+
+    @property
+    def settlement_feeds(self) -> tuple[str, ...]:
+        """The settlement report feeds the marketplaces name, deduplicated."""
+        return tuple(dict.fromkeys(c.settlement for c in self.marketplaces.values() if c.settlement))
 
     @property
     def cod_channels(self) -> tuple[str, ...]:
