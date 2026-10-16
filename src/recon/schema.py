@@ -26,7 +26,7 @@ REQUIRED_COLUMNS: dict[str, tuple[str, ...]] = {
 
 # Canonical columns parsed as numbers during normalization (optional ones included).
 NUMERIC_COLUMNS: dict[str, tuple[str, ...]] = {
-    "oms": ("order_amount",),
+    "oms": ("order_amount", "item_total"),
     "bank": ("credit_amount", "fee_amount", "net_amount"),
     "logistics": ("cod_collected", "ship_fee", "cod_fee"),
     "settlement": ("gross", "net", "refund"),
@@ -59,9 +59,13 @@ ORDER_STATUS = "order_status"
 # Optional payer names: the OMS customer, and the bank payer (a column, or extracted from the description).
 CUSTOMER_NAME = "customer_name"
 PAYER_NAME = "payer_name"
-# Optional OMS columns: the sales channel (it names the money chain), and the channel's own order number.
+# Optional OMS columns: the sales channel (it names the money chain), the channel's own order number,
+# and the item total (the order amount less buyer-paid shipping): what a marketplace line's gross pays.
 CHANNEL = "channel"
 CHANNEL_ORDER_NO = "channel_order_no"
+ITEM_TOTAL = "item_total"
+# The payout a settlement line belongs to; an optional bank column too (else found in the description).
+PAYOUT_ID = "payout_id"
 # Optional logistics columns: the carrier remittance a shipment's COD was paid in, and the shipment status.
 REMITTANCE_ID = "remittance_id"
 SHIPMENT_STATUS = "status"

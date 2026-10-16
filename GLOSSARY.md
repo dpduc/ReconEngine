@@ -26,6 +26,10 @@ _Avoid_: flow, path, pipeline
 One bank credit that pays many orders at once: a marketplace payout or a carrier's COD remittance.
 _Avoid_: payout (for both kinds), batch payment
 
+**Settlement line**:
+One order's row in a settlement report: its gross, fees, refund and net, and the payout it is paid in.
+_Avoid_: settlement row, escrow line
+
 **Remittance**:
 A settlement batch from a carrier: the COD it collected, less shipping and COD fees.
 _Avoid_: COD payout

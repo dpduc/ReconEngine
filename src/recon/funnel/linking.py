@@ -44,7 +44,7 @@ def bank_order_refs(bank: pd.DataFrame, patterns: tuple[str, ...] = ()) -> pd.Se
     return bank["description"].map(lambda description: extract_order_ref(description, patterns))
 
 
-def _link_one_to_one(units: pd.DataFrame, all_keys: pd.Series, other: pd.DataFrame, unit_key: str,
+def link_one_to_one(units: pd.DataFrame, all_keys: pd.Series, other: pd.DataFrame, unit_key: str,
                      other_key: str, suffixes: tuple[str, str], link_column: str) -> pd.DataFrame:
     """Left-join `other` where the key is unique on both sides; ambiguous keys stay unlinked.
 
@@ -63,12 +63,12 @@ def _link_one_to_one(units: pd.DataFrame, all_keys: pd.Series, other: pd.DataFra
 
 def attach_exact(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     """`units` enriched with the bank and logistics records naming them (one-to-one only)."""
-    bank = _bank_frame(ctx)
+    bank = bank_frame(ctx)
     logistics = lineage_prefixed(ctx.feeds["logistics"], "logistics")
     order_id, orders = ORDER_REF_COLUMNS["oms"], ctx.feeds["oms"][ORDER_REF_COLUMNS["oms"]].dropna()
-    linked = _link_one_to_one(units, orders, bank, order_id, ORDER_REF_COLUMNS["bank"], ("_oms", "_bank"),
+    linked = link_one_to_one(units, orders, bank, order_id, ORDER_REF_COLUMNS["bank"], ("_oms", "_bank"),
                               "bank_link_pass")
-    return _link_one_to_one(linked, orders, logistics, order_id, ORDER_REF_COLUMNS["logistics"], ("", "_logistics"),
+    return link_one_to_one(linked, orders, logistics, order_id, ORDER_REF_COLUMNS["logistics"], ("", "_logistics"),
                             "logistics_link_pass")
 
 
@@ -78,7 +78,7 @@ def link_exact(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
     return pass_on(linked)
 
 
-def _bank_frame(ctx: FunnelContext) -> pd.DataFrame:
+def bank_frame(ctx: FunnelContext) -> pd.DataFrame:
     bank = lineage_prefixed(ctx.feeds["bank"], "bank")
     bank[ORDER_REF_COLUMNS["bank"]] = bank_order_refs(bank, ctx.order_ref_patterns)
     return bank
@@ -100,9 +100,11 @@ def _candidate_pairs(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     Pairs share a currency (when both feeds carry one) and have the credit within the
     amount tolerance of the expected credit; `day_gap` is |value date - order date|.
     """
-    bank = _bank_frame(ctx)
-    # Rows already linked, or whose reference names a known order (possibly decided upstream), are not free.
-    claimed = bank["bank_source_row"].isin(units["bank_source_row"].dropna())
+    bank = bank_frame(ctx)
+    # Rows already linked, naming a payout, or whose reference names a known order (possibly decided
+    # upstream), are not free.
+    claimed = bank["bank_source_row"].isin(units["bank_source_row"].dropna()) | bank["bank_source_row"].isin(
+        ctx.payout_credit_rows)
     names_order = bank[ORDER_REF_COLUMNS["bank"]].isin(ctx.feeds["oms"][ORDER_REF_COLUMNS["oms"]].dropna())
     bank = bank[~claimed & ~names_order]
     open_units = units[units["bank_link_pass"].isna()]
@@ -122,7 +124,7 @@ def _candidate_pairs(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     return pairs[["unit_id", "bank_pos", "day_gap"]].reset_index(drop=True)
 
 
-def _attach_bank(units: pd.DataFrame, bank: pd.DataFrame, links: pd.DataFrame, link_pass: str) -> pd.DataFrame:
+def attach_bank(units: pd.DataFrame, bank: pd.DataFrame, links: pd.DataFrame, link_pass: str) -> pd.DataFrame:
     """Copy the linked bank row into each unit in `links` (unit_id -> bank_pos), as pass 1 named the columns."""
     out = units.copy()
     rows = out["unit_id"].map(links.set_index("unit_id")["bank_pos"])
@@ -171,9 +173,9 @@ def link_constrained(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
     """
     pairs = _candidate_pairs(units, ctx)
     pairs = pairs[pairs["day_gap"] <= ctx.policy.link_date_window_days]
-    pairs = pairs[~_payer_differs(pairs, units, _bank_frame(ctx), ctx)]
+    pairs = pairs[~_payer_differs(pairs, units, bank_frame(ctx), ctx)]
     unique = ~pairs["unit_id"].duplicated(keep=False) & ~pairs["bank_pos"].duplicated(keep=False)
-    linked = _attach_bank(units, _bank_frame(ctx), pairs[unique], "constrained")
+    linked = attach_bank(units, bank_frame(ctx), pairs[unique], "constrained")
     return pass_on(linked)
 
 
@@ -190,7 +192,7 @@ def link_candidates(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
     pairs = pairs[pairs["day_gap"] <= 2 * window]
     if pairs.empty:
         return pass_on(units)
-    bank = _bank_frame(ctx)
+    bank = bank_frame(ctx)
     pairs = pairs.assign(txn_ref=bank.loc[pairs["bank_pos"], "txn_ref"].to_numpy(),
                          score=(CANDIDATE_MAX_SCORE * (1 - pairs["day_gap"] / (2 * window + 1))).round(4))
     pairs = pairs.assign(source_row=bank.loc[pairs["bank_pos"], "bank_source_row"].to_numpy())

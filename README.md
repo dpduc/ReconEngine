@@ -69,15 +69,19 @@ outcome = run("data/generated", config)      # ReconRun, or a "blocked" run list
 outcome.results          # one row per unit: deciding step, decision, reason codes, deltas, explanation
 outcome.exception_queue  # EXCEPTION + REVIEW units and orphans, ranked
 outcome.close_watchlist # auto-accepted with a note; revisit first if the period won't close
-outcome.bundle()         # decisions, triage queue, exception queue, orphans, close watchlist, funnel, excluded rows, manifest
+outcome.settlement_batches  # one row per payout of a settlement report: its lines, credit and tie-out
+outcome.bundle()         # decisions, triage queue, exception queue, orphans, close watchlist, funnel, excluded rows,
+                         # settlement batches, manifest
 ```
 
 ### Run config
 
 A run config is a JSON file (or YAML, if PyYAML is installed) with these parts:
 
-- `feeds`: path, format, encoding, date format and delimiter for each feed. The feeds named `oms`, `bank` and `logistics` are the orders, bank and logistics feeds. Any other feed is a settlement report and states `"role": "settlement"`. It is loaded and Health-checked (required columns `order_no`, `payout_id`, `gross`, `net`) but not yet reconciled.
-- `channels`: optional. Each OMS `channel` value names its money chain (only `prepaid` so far) and, optionally, the `order_ref_pattern` that finds its orders in a bank description (named group `ref`, e.g. `"DON (?P<ref>#\\d+)"`). Without channels, every order is on one prepaid chain with the default pattern. When channels are declared, orders of an undeclared channel are a Health warning.
+- `feeds`: path, format, encoding, date format and delimiter for each feed. The feeds named `oms`, `bank` and `logistics` are the orders, bank and logistics feeds. Any other feed is a settlement report and states `"role": "settlement"`. Its mapping names the required columns `order_no`, `payout_id`, `gross` and `net`, and optionally `refund`, `settled_at` and any number of fee columns `fee_<name>` (fees and refunds may be printed as negative numbers).
+- `channels`: optional. Each OMS `channel` value names its money chain. Without channels, every order is on one prepaid chain with the default pattern. When channels are declared, orders of an undeclared channel are a Health warning.
+  - `prepaid`: optionally, the `order_ref_pattern` that finds its orders in a bank description (named group `ref`, e.g. `"DON (?P<ref>#\\d+)"`).
+  - `marketplace`: `settlement` names the channel's settlement report. An order links to its line by the OMS `channel_order_no`, and the line's payout to the bank credit whose description (or `payout_id` column) names it. `fee_bps` is the channel's total fee on a line's gross (unset: fees are not checked). A line's gross is compared with the OMS `item_total` when mapped, else with `order_amount`. `amount_tolerance` overrides the policy's for the channel's checks.
 - `mapping`: canonical column → source column, for each feed.
 - `policy`: absolute amount tolerance (default 0.01), date window for linking (default ±4 days), fee rates (`mdr_bps`, overridden per bank `payment_type` by `payment_type_fee_bps`, e.g. `{"bank_transfer": 0, "wallet": 110}`), `payer_pattern` (a regex with a named group `payer` that finds the payer in a bank description, when the bank feed has no `payer_name` column; compared with the OMS `customer_name` in linking pass 2), a `status_policy` that says which order statuses need payment and/or shipment evidence, and an optional `fx` setting (see [Currencies and FX](#currencies-and-fx)).
 - `resolutions`: the fixes and acknowledgements recorded in the Fix step.
@@ -151,16 +155,19 @@ missing shipments.
 |---|---|---|
 | 1 | `missing_source_evidence` | `MISSING_SOURCE_EVIDENCE`: no order amount |
 | 2 | `status_policy` | `ORDER_STATUS_REQUIRES_POLICY`: a status the policy doesn't cover |
-| 3 | `link_exact` | links one-to-one on references (structured `order_ref`, or extracted from the bank description) |
-| 4 | `link_constrained` | links on same currency, amount within tolerance and date within the window. Never auto-matches when several candidates qualify, and never links a credit from a different payer than the order's customer |
-| 5 | `link_candidates` | REVIEW with `LINK_CANDIDATES`: proposes candidates with a confidence score, never auto-accepted |
-| 6 | `route_review` | REVIEW: duplicate keys whose strategy is "route to review" |
-| 7 | rule checks | `MISSING_PAYMENT` → `CURRENCY_MISMATCH` → `FX_DIFFERENCE` → `AMOUNT_MISMATCH` → `MISSING_SHIPMENT` → fee / COD fee → `TIMING_MISMATCH` → `POSSIBLE_INSTALLMENT_INTEREST` (REVIEW) |
-| 8 | `decision` | `AUTO_ACCEPT` (`INSTALLMENT_INTEREST` when the stated interest explains the delta) |
-| 9 | `reverse_pass` | `ORPHAN_PAYMENT` / `ORPHAN_SHIPMENT`: bank or 3PL records that link to no order |
+| 3 | `settle_marketplace` | every order of a marketplace channel, along its chain: `MISSING_PAYMENT` (no line, or no credit for its payout) → `AMOUNT_MISMATCH` (refund, or gross off the order) → `FEE_MISMATCH` (fees off the channel's terms) → REVIEW `SETTLEMENT_BATCH_MISMATCH` (the payout credit differs from its lines' net) → `AUTO_ACCEPT` `SETTLEMENT_TIE_OUT` |
+| 4 | `link_exact` | links one-to-one on references (structured `order_ref`, or extracted from the bank description) |
+| 5 | `link_constrained` | links on same currency, amount within tolerance and date within the window, skipping payout credits. Never auto-matches when several candidates qualify, and never links a credit from a different payer than the order's customer |
+| 6 | `link_candidates` | REVIEW with `LINK_CANDIDATES`: proposes candidates with a confidence score, never auto-accepted |
+| 7 | `route_review` | REVIEW: duplicate keys whose strategy is "route to review" |
+| 8 | rule checks | `MISSING_PAYMENT` → `CURRENCY_MISMATCH` → `FX_DIFFERENCE` → `AMOUNT_MISMATCH` → `MISSING_SHIPMENT` → fee / COD fee → `TIMING_MISMATCH` → `POSSIBLE_INSTALLMENT_INTEREST` (REVIEW) |
+| 9 | `decision` | `AUTO_ACCEPT` (`INSTALLMENT_INTEREST` when the stated interest explains the delta) |
+| 10 | `reverse_pass` | `ORPHAN_PAYMENT` / `ORPHAN_SHIPMENT`: bank or 3PL records that link to no order (payout credits are reported on their settlement batch instead) |
 
 Each unit gets one reason code (the first check it fails) and a plain-language
-explanation. It also records the step that decided it, the rule version and the
+explanation. A problem on a marketplace order's own line is reported on that order even when its batch is also off.
+Each settlement batch gets its own result (`BATCH_TIE_OUT`, `MISSING_PAYMENT`, `SETTLEMENT_BATCH_MISMATCH` or
+`PAYOUT_CREDIT_AMBIGUOUS`), with the orders of the run among its lines and those that are exceptions. It also records the step that decided it, the rule version and the
 hashes of the input rows behind it.
 
 ## Benchmark results
@@ -199,8 +206,10 @@ then reports:
 
 On the Olist benchmark, all 196,078 links are made in pass 1 and are correct.
 
-The Vietnamese multi-channel sets (`test/vn`) record a link baseline in their manifests. Linking by order reference is
-correct, but recall is 23–52% because marketplace payouts and COD remittances can't be linked yet.
+The Vietnamese multi-channel sets (`test/vn`) record a baseline in their manifests. Marketplace orders are settled
+through their Shopee and TikTok Shop reports, so every settlement line and payout credit is linked. Link recall is
+63–90% because COD remittances can't be linked yet; on the marketplace-heavy set, accuracy is 89% with an
+auto-accept precision of 1.0.
 
 **Known gaps in the benchmark:**
 

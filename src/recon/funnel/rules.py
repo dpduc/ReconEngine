@@ -17,7 +17,7 @@ from recon.funnel.reasons import exception
 from recon.schema import CURRENCY, INSTALLMENTS, INTEREST_AMOUNT, PAYMENT_TYPE, REVIEW
 
 
-def _within(delta: pd.Series, tolerance: float) -> pd.Series:
+def within(delta: pd.Series, tolerance: float) -> pd.Series:
     """Absolute tolerance, inclusive; the epsilon absorbs float noise such as 20.01 - 20.00."""
     return delta.abs() <= tolerance + 1e-9
 
@@ -44,11 +44,11 @@ def _measure(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     out["expected_cod_fee"] = out["cod_collected"].fillna(0).map(lambda x: fee(int(x), policy.cod_fee_bps))
     out["fee_delta"] = out["fee_amount"].fillna(0) - out["expected_mdr"]
     out["cod_fee_delta"] = out["cod_fee"].fillna(0) - out["expected_cod_fee"]
-    out["amount_within_tolerance"] = (_within(out["credit_delta"], policy.amount_tolerance)) & (
-        ~out["payment_method"].eq("COD") | (_within(out["cod_amount_delta"], policy.amount_tolerance))
+    out["amount_within_tolerance"] = (within(out["credit_delta"], policy.amount_tolerance)) & (
+        ~out["payment_method"].eq("COD") | (within(out["cod_amount_delta"], policy.amount_tolerance))
     )
-    out["fee_within_tolerance"] = _within(out["fee_delta"], policy.amount_tolerance)
-    out["cod_fee_within_tolerance"] = _within(out["cod_fee_delta"], policy.amount_tolerance)
+    out["fee_within_tolerance"] = within(out["fee_delta"], policy.amount_tolerance)
+    out["cod_fee_within_tolerance"] = within(out["cod_fee_delta"], policy.amount_tolerance)
     _installment_interest(out, policy)
     out["fx_within_tolerance"] = out["fx_converted"] & (
         out["credit_delta"].abs() <= policy.fx.tolerance * out["expected_credit"].abs() + 1e-9
@@ -91,7 +91,7 @@ def _installment_interest(out: pd.DataFrame, policy) -> None:
     paid_in_parts = installments.fillna(0) > 1 if installments is not None else pd.Series(False, index=out.index)
     if interest is not None:
         stated = interest.fillna(0)
-        out["interest_explained"] = over & (stated > 0) & _within(out["credit_delta"] - stated, policy.amount_tolerance)
+        out["interest_explained"] = over & (stated > 0) & within(out["credit_delta"] - stated, policy.amount_tolerance)
         out["interest_possible"] = False
     else:
         out["interest_explained"] = False

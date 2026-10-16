@@ -99,27 +99,41 @@ class FeedSpec:
 
 
 # Money chains (ADR 0001): how a channel's money reaches the bank.
-PREPAID = "prepaid"
-CHAINS = (PREPAID,)
+PREPAID, MARKETPLACE = "prepaid", "marketplace"
+CHAINS = (PREPAID, MARKETPLACE)
 
 
 @dataclass(frozen=True)
 class Channel:
     """One sales channel (an OMS `channel` value) and its money chain.
 
-    prepaid  order ──order ref──▶ bank credit. `order_ref_pattern` finds the order in a bank
-             description: its named group `ref`, else its first group, else the whole match.
-             None: the default pattern.
+    prepaid      order ──order ref──▶ bank credit. `order_ref_pattern` finds the order in a bank
+                 description: its named group `ref`, else its first group, else the whole match.
+                 None: the default pattern.
+    marketplace  order ──channel order no──▶ settlement line ──payout id──▶ bank credit.
+                 `settlement` names the settlement report feed; `fee_bps` is the channel's total
+                 fee on a line's gross (None: fees are not checked).
+
+    `amount_tolerance` (None: the policy's) applies to the channel's line checks and batch tie-out.
     """
 
     chain: str = PREPAID
     order_ref_pattern: str | None = None
+    settlement: str | None = None
+    fee_bps: int | None = None
+    amount_tolerance: float | None = None
 
     def __post_init__(self) -> None:
         if self.chain not in CHAINS:
             raise ValueError(f"unknown money chain {self.chain!r}; expected one of {', '.join(CHAINS)}")
         if self.order_ref_pattern is not None:
             re.compile(self.order_ref_pattern)
+        if (self.chain == MARKETPLACE) != (self.settlement is not None):
+            raise ValueError("a marketplace channel names its settlement report (settlement); "
+                             "other chains have none")
+
+    def tolerance(self, policy: Policy) -> float:
+        return policy.amount_tolerance if self.amount_tolerance is None else self.amount_tolerance
 
 
 @dataclass(frozen=True)
@@ -152,6 +166,9 @@ class RunConfig:
                 raise ValueError(f"feed {name!r} needs a role: the orders, bank and logistics feeds are named "
                                  f"{', '.join(FEEDS)}; any other feed is a settlement report (role "
                                  f"{SETTLEMENT!r})")
+        for name, channel in self.channels.items():
+            if channel.settlement is not None and self.role(channel.settlement) != SETTLEMENT:
+                raise ValueError(f"channel {name!r}: {channel.settlement!r} is not a settlement report feed")
 
     def role(self, feed: str) -> str | None:
         """The feed's role: implied by its name (oms, bank, logistics), else as its spec states."""
@@ -162,6 +179,11 @@ class RunConfig:
         """The schema kind of the feed's role (see ``schema.ROLES``): the key of every schema table."""
         role = self.role(feed)
         return ROLES[role] if role else None
+
+    @property
+    def marketplaces(self) -> dict[str, Channel]:
+        """The channels on the marketplace chain, by OMS channel value."""
+        return {name: c for name, c in self.channels.items() if c.chain == MARKETPLACE}
 
     @property
     def order_ref_patterns(self) -> tuple[str, ...]:

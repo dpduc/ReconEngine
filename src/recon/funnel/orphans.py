@@ -22,11 +22,13 @@ def _column(frame: pd.DataFrame, column: str) -> pd.Series:
     return frame[column] if column in frame else pd.Series(dtype=object)
 
 
-def reverse_pass(results: pd.DataFrame, feeds: dict[str, pd.DataFrame]) -> tuple[pd.DataFrame, dict[str, Any]]:
+def reverse_pass(results: pd.DataFrame, feeds: dict[str, pd.DataFrame],
+                 batch_credits: frozenset[int] = frozenset()) -> tuple[pd.DataFrame, dict[str, Any]]:
     """One EXCEPTION row per bank/logistics record whose source row no unit carries.
 
     Bank records a unit lists as pass 3 candidates are already in front of a reviewer with that
-    unit, so they are examined but passed on. Returns (orphans, funnel counts row).
+    unit, and payout credits (`batch_credits`) are reported on their settlement batch, so both are
+    examined but passed on. Returns (orphans, funnel counts row).
     """
     orphans, examined, candidates = [], 0, 0
     for feed, code in ORPHAN_CODES.items():
@@ -34,6 +36,7 @@ def reverse_pass(results: pd.DataFrame, feeds: dict[str, pd.DataFrame]) -> tuple
         listed = set()
         if feed == "bank":
             listed = {int(r) for rows in _column(results, CANDIDATE_ROWS).dropna() for r in rows.split("|")}
+            listed |= batch_credits
         frame = feeds[feed]
         unlinked = frame[~frame[SOURCE_ROW].isin(linked)]
         is_candidate = unlinked[SOURCE_ROW].isin(listed)
