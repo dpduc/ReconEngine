@@ -159,22 +159,22 @@
     "status": "COMPLETED",
     "warnings_acknowledged": 12,
     "decisions": {
-      "AUTO_ACCEPT": 1327,
-      "EXCEPTION": 211,
+      "AUTO_ACCEPT": 1330,
+      "EXCEPTION": 208,
       "REVIEW": 3
     },
-    "accuracy": 0.9961064243997404,
+    "accuracy": 0.9980532121998702,
     "auto_accept_precision": 1.0,
-    "orphans": 43,
+    "orphans": 37,
     "links": {
       "precision": 1.0,
-      "recall": 0.9969625379682754,
+      "recall": 0.9989875126560918,
       "recall_per_link_kind": {
         "bank:cod_remittance": 1.0,
         "bank:name_amount": 0.918918918918919,
         "bank:order_ref": 1.0,
         "bank:payout_batch": 1.0,
-        "bank:split": 0.0,
+        "bank:split": 1.0,
         "logistics:order_ref": 1.0,
         "shopee:order_no": 1.0,
         "tiktok:order_no": 1.0

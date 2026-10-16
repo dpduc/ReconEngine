@@ -184,11 +184,11 @@ missing shipments.
 | 2 | `status_policy` | `ORDER_STATUS_REQUIRES_POLICY`: a status the policy doesn't cover |
 | 3 | `settle_marketplace` | every order of a marketplace channel, along its chain: `MISSING_PAYMENT` (no line, or no credit for its payout) → `AMOUNT_MISMATCH` (refund, or gross off the order) → `FEE_MISMATCH` (fees off the channel's terms) → REVIEW `SETTLEMENT_BATCH_MISMATCH` (the payout credit differs from its lines' net) → `AUTO_ACCEPT` `SETTLEMENT_TIE_OUT` |
 | 4 | `settle_cod` | every COD order of a `cod_remittances` channel, along its chain: `MISSING_SHIPMENT` → `MISSING_PAYMENT` (returned, on no remittance yet, or no credit for its remittance) → `AMOUNT_MISMATCH` (COD collected off the order) → `COD_FEE_MISMATCH` → REVIEW `SETTLEMENT_BATCH_MISMATCH` (the remittance credit differs from its shipments' COD less fees) → `AUTO_ACCEPT` `REMITTANCE_TIE_OUT` |
-| 5 | `link_exact` | links one-to-one on references (structured `order_ref`, or extracted from the bank description) |
-| 6 | `link_constrained` | links on same currency, amount within tolerance and date within the window, skipping payout and remittance credits. Never auto-matches when several candidates qualify, and never links a credit from a different payer than the order's customer |
+| 5 | `link_exact` | links one-to-one on references (structured `order_ref`, or extracted from the bank description). Several credits naming the same order link as one split payment, compared as their total |
+| 6 | `link_constrained` | links on same currency, amount within tolerance and date within the window, skipping payout and remittance credits. Never auto-matches when several candidates qualify, and never links a credit from a different payer than the order's customer. An order whose customer paid in several credits links to them as a split payment (`constrained_split`) when every free credit from that payer within the window together pays it, and no other open order of the customer has them in its window |
 | 7 | `link_candidates` | REVIEW with `LINK_CANDIDATES`: proposes candidates with a confidence score, never auto-accepted |
 | 8 | `route_review` | REVIEW: duplicate keys whose strategy is "route to review" |
-| 9 | rule checks | `MISSING_PAYMENT` → `CURRENCY_MISMATCH` → `FX_DIFFERENCE` → `AMOUNT_MISMATCH` → `MISSING_SHIPMENT` → fee / COD fee → `TIMING_MISMATCH` → `POSSIBLE_INSTALLMENT_INTEREST` (REVIEW) |
+| 9 | rule checks | `MISSING_PAYMENT` → `CURRENCY_MISMATCH` → `DUPLICATE_PAYMENT` (several credits, one of which alone pays the order) → `FX_DIFFERENCE` → `AMOUNT_MISMATCH` → `MISSING_SHIPMENT` → fee / COD fee → `TIMING_MISMATCH` → `POSSIBLE_INSTALLMENT_INTEREST` (REVIEW) |
 | 10 | `decision` | `AUTO_ACCEPT` (`INSTALLMENT_INTEREST` when the stated interest explains the delta) |
 | 11 | `reverse_pass` | `ORPHAN_PAYMENT` / `ORPHAN_SHIPMENT`: bank or 3PL records that link to no order (payout and remittance credits are reported on their settlement batch instead) |
 
@@ -237,8 +237,9 @@ On the Olist benchmark, all 196,078 links are made in pass 1 and are correct.
 
 The Vietnamese multi-channel sets (`test/vn`) record a baseline in their manifests. Marketplace orders are settled
 through their Shopee and TikTok Shop reports and COD orders through the GHN, GHTK and J&T remittances, so every
-settlement line, payout credit and remittance credit is linked. Accuracy is 94–99.8% with an auto-accept precision
-of 1.0; most orders still wrong are split transfers (#41).
+settlement line, payout credit and remittance credit is linked, and split transfers link as a group. Accuracy is
+96.7–100% with an auto-accept precision of 1.0; the orders still wrong are payer-name cases whose truth is REVIEW,
+which the scoring counts as wrong (#43).
 
 **Known gaps in the benchmark:**
 
@@ -311,5 +312,5 @@ tests of the wizard. The benchmark tests need `data/generated/`; see Quick start
 
 - **Shared audit log:** the log is a local file, so experts working on different machines don't share it.
 - **Infrastructure:** PostgreSQL sources, and dedup across repeated ingests of the same file.
-- **Matching beyond one-to-one:** split payments, and batches without a settlement report.
+- **Matching beyond one-to-one:** batches without a settlement report.
 - **Packaging:** Docker.

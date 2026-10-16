@@ -10,7 +10,7 @@ from typing import Any
 import pandas as pd
 
 from recon.funnel.base import RULE_VERSION, decide, lineage_prefixed
-from recon.funnel.linking import CANDIDATE_ROWS
+from recon.funnel.linking import CANDIDATE_ROWS, linked_bank_rows
 from recon.funnel.reasons import EXCEPTION_CONFIDENCE
 from recon.schema import EXCEPTION, SOURCE_ROW
 
@@ -35,6 +35,7 @@ def reverse_pass(results: pd.DataFrame, feeds: dict[str, pd.DataFrame],
         linked = set(_column(results, f"{feed}_{SOURCE_ROW}").dropna())
         listed = set()
         if feed == "bank":
+            linked = linked_bank_rows(results)  # every part of a split payment
             listed = {int(r) for rows in _column(results, CANDIDATE_ROWS).dropna() for r in rows.split("|")}
             listed |= batch_credits
         frame = feeds[feed]
