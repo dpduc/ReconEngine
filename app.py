@@ -1,7 +1,7 @@
 """SmartRecon entry point: wizard navigation over ``recon.pipeline``.
 
 Pages live in ``app_pages/`` and share state through ``recon_app.state``. Wizard steps
-run in order: Load -> Health -> Fix -> Run -> Review.
+run in order: Load -> Health -> Fix -> Run -> Review -> Handoff.
 """
 
 import streamlit as st
@@ -17,6 +17,7 @@ WIZARD = [
     st.Page("app_pages/fix.py", title="Fix", icon=":material/build:"),
     st.Page("app_pages/run.py", title="Run", icon=":material/play_arrow:"),
     st.Page("app_pages/review.py", title="Review", icon=":material/fact_check:"),
+    st.Page("app_pages/handoff.py", title="Handoff", icon=":material/assignment_turned_in:"),
 ]
 BENCHMARK = [
     st.Page("app_pages/overview.py", title="Executive overview", icon=":material/dashboard:"),

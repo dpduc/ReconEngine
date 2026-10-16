@@ -1,21 +1,43 @@
-"""Review: browse the ranked exception queue (exceptions, review units, orphans), trace any record."""
+"""Review: work the ranked exception queue (exceptions, review units, orphans), trace any record, and
+record a resolution action on it in the audit log."""
 
 import pandas as pd
 import streamlit as st
 
-from recon.pipeline import AMOUNT_COLUMNS, FEEDS
+from recon.pipeline import (
+    ACTION_LABELS,
+    AMOUNT_COLUMNS,
+    FEEDS,
+    OVERRIDE,
+    REOPEN,
+    RESOLVING_ACTIONS,
+    unresolved_queue,
+    resolved_items,
+)
 from recon_app import state
 from recon_app.trace import DELTA_COLUMNS, source_rows
 
 st.title("Review")
 outcome = state.require_run()
+log = state.audit_log()
+log.register_queue(outcome)  # starts the resolution clock the first time this queue is shown
+pending = unresolved_queue(outcome, log)  # resolved items leave the unresolved queue
 
-QUEUE = "Exception queue"
+
+def resolved_view() -> pd.DataFrame:
+    done = resolved_items(outcome, log)[["record_type", "record_ref", "event", "actor", "at", "note", "matched_ref"]]
+    done = done.rename(columns={"event": "resolution", "actor": "resolved_by", "at": "resolved_at"})
+    return outcome.exception_queue.merge(done, on=["record_type", "record_ref"])
+
+
+QUEUE = "Unresolved"
+RESOLVED = "Resolved"
 WATCHLIST = "Revisit if the period won't close"
 VIEWS = {
-    QUEUE: lambda: outcome.exception_queue,  # EXCEPTION and REVIEW units plus orphans
-    "Needs review": lambda: outcome.exception_queue.query("decision == 'REVIEW'").reset_index(drop=True),
-    "Orphans": lambda: outcome.exception_queue.query("record_type != 'oms'").reset_index(drop=True),
+    QUEUE: lambda: pending,  # EXCEPTION and REVIEW units plus orphans no one has resolved yet
+    "Needs review": lambda: pending.query("decision == 'REVIEW'").reset_index(drop=True),
+    "Orphans": lambda: pending.query("record_type != 'oms'").reset_index(drop=True),
+    RESOLVED: resolved_view,
     "All units": lambda: outcome.results.assign(record_type="oms", record_ref=outcome.results["order_id"]),
     WATCHLIST: lambda: outcome.close_watchlist.assign(record_type="oms", record_ref=outcome.close_watchlist["order_id"],
                                                       amount_at_risk=outcome.close_watchlist["note_amount"]),
@@ -54,7 +76,8 @@ if query:
 records = records.reset_index(drop=True)
 
 COLUMNS = ["record_type", "record_ref", "amount_at_risk", "age_days", "decision", "reason_codes",
-           "deciding_step", "confidence", "link_candidates"]
+           "recommended_action", "resolution", "resolved_by", "resolved_at", "deciding_step", "confidence",
+           "link_candidates"]
 st.caption(f"{len(records):,} record(s); select a row to trace it.")
 table = st.dataframe(records[[c for c in COLUMNS if c in records]], hide_index=True, key="review_table",
                      on_select="rerun", selection_mode="single-row", height=320)
@@ -70,6 +93,45 @@ with st.container(border=True):
     deltas = {c: record[c] for c in DELTA_COLUMNS if c in record and pd.notna(record[c])}
     if deltas:
         st.dataframe(pd.DataFrame([deltas]), hide_index=True, key="review_deltas")
+
+
+
+def resolve_form(record: pd.Series) -> None:
+    """Record a resolution action on a queue item, or reopen a resolved one."""
+    item = (record["record_type"], str(record["record_ref"]))
+    queued = outcome.exception_queue
+    if not ((queued["record_type"] == item[0]) & (queued["record_ref"].astype(str) == item[1])).any():
+        st.caption("Not in the exception queue: nothing to resolve.")
+        return
+    is_open = ((pending["record_type"] == item[0]) & (pending["record_ref"].astype(str) == item[1])).any()
+    if is_open:
+        advice = pending[(pending["record_type"] == item[0]) & (pending["record_ref"].astype(str) == item[1])].iloc[0]
+        if advice["recommended_action"]:
+            st.markdown(f"Recommended: **{ACTION_LABELS[advice['recommended_action']]}**, "
+                        f"{advice['recommended_why']}.")
+        actions = list(RESOLVING_ACTIONS)
+        default = actions.index(advice["recommended_action"]) if advice["recommended_action"] in actions else 0
+    else:
+        st.markdown("Resolved. Reopen it to put it back in the unresolved queue.")
+        actions, default = [REOPEN], 0
+    with st.form("resolve", border=False):
+        actor = st.text_input("Your name", key="review_actor")
+        action = st.selectbox("Action", actions, index=default, format_func=ACTION_LABELS.get, key="review_action")
+        matched = st.text_input("Match to record (override)", key="review_match",
+                                placeholder=str(record.get("link_candidates") or "e.g. a bank txn_ref"))
+        note = st.text_input("Note", key="review_note", help="Required for every action but confirm.")
+        if st.form_submit_button("Record action", type="primary", icon=":material/check:", key="review_submit"):
+            try:
+                log.record(outcome, item[0], item[1], action, actor=actor, note=note,
+                           matched_ref=matched if action == OVERRIDE else "")
+            except ValueError as error:
+                st.error(str(error))
+            else:
+                st.rerun()
+
+
+with st.expander("Resolve", expanded=True, icon=":material/gavel:"):
+    resolve_form(record)
 
 rows = source_rows(record, outcome.feeds)
 oms_amount = rows["oms"][AMOUNT_COLUMNS["oms"]] if rows["oms"] is not None else None
