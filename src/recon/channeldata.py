@@ -42,7 +42,7 @@ import pandas as pd
 
 from recon.contracts import fee as vnd_fee
 
-GENERATOR_VERSION = "2.1.0"
+GENERATOR_VERSION = "2.3.0"
 SOURCE_FILES = ("olist_orders_dataset.csv", "olist_order_items_dataset.csv", "olist_order_payments_dataset.csv")
 DATE_SHIFT = pd.Timedelta(days=2926)  # 418 weeks: weekdays kept, Black Friday 2017 -> Black Friday 2025
 DATE_COLUMNS = ("order_purchase_timestamp", "order_approved_at", "order_delivered_carrier_date",
@@ -856,7 +856,10 @@ class Market:
 
 MARKETS = {
     "vn": Market("vn", "VND", _VietnamSeller, VietnamAssumptions(), VN_PROFILES,
-                 {"mdr_bps": VietnamAssumptions.wallet_mdr_bps, "cod_fee_bps": VietnamAssumptions.cod_fee_bps,
+                 {"mdr_bps": VietnamAssumptions.wallet_mdr_bps,
+                  "payment_type_fee_bps": {"bank_transfer": 0, "wallet": VietnamAssumptions.wallet_mdr_bps},
+                  "cod_fee_bps": VietnamAssumptions.cod_fee_bps,
+                  "payer_pattern": r"^[A-Z]+\.\d+\.(?P<payer>[A-Z ]+?) chuyen tien",
                   "amount_tolerance": 1_000},
                  {"prices": "Olist item prices x price_scale VND/BRL and freight x freight_scale (clipped), "
                             "rounded to 1,000 VND: Vietnamese order values, not the FX rate",
@@ -866,7 +869,8 @@ MARKETS = {
                                    "diacritics"}),
     "br": Market("br", "BRL", _BrazilSeller, BrazilAssumptions(), BR_PROFILES,
                  {"mdr_bps": round(BrazilAssumptions.card_mdr * 10_000),
-                  "cod_fee_bps": round(BrazilAssumptions.courier_cod_fee * 10_000), "amount_tolerance": 0.01},
+                  "cod_fee_bps": round(BrazilAssumptions.courier_cod_fee * 10_000), "amount_tolerance": 0.01,
+                  "payer_pattern": r"^PIX RECEBIDO - (?P<payer>.+)$"},
                  {"customer_name": "synthetic names (Olist has none)"}),
 }
 
@@ -956,7 +960,8 @@ def config_for(market: Market) -> dict[str, Any]:
                   for name, file in (("oms", "oms_orders"), ("bank", "bank_statement"),
                                      ("logistics", "logistics_report"))},
         "mapping": {
-            "oms": {c: c for c in ("order_id", "tracking_no", "payment_method", "order_amount", "ordered_at")},
+            "oms": {c: c for c in ("order_id", "tracking_no", "payment_method", "order_amount", "ordered_at",
+                                   "customer_name")},
             "bank": {c: c for c in ("txn_ref", "description", "credit_amount", "fee_amount", "net_amount",
                                     "value_date")},
             "logistics": {c: c for c in ("tracking_code", "client_order_code", "cod_collected", "ship_fee",

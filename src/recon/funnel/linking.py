@@ -7,12 +7,13 @@ loose bank candidates to REVIEW.
 from __future__ import annotations
 
 import re
+import unicodedata
 from typing import Any
 
 import pandas as pd
 
 from recon.funnel.base import FunnelContext, StepOutcome, cod_remittance, decide, lineage_prefixed, pass_on
-from recon.schema import CURRENCY, ORDER_REF_COLUMNS, REVIEW
+from recon.schema import CURRENCY, CUSTOMER_NAME, ORDER_REF_COLUMNS, PAYER_NAME, REVIEW
 
 ORDER_REF = re.compile(r"(ORD\d{4}-\d{7}|[0-9a-f]{32})", re.IGNORECASE)
 CANDIDATE_MAX_SCORE = 0.5  # pass 3 scores stay well below any accept threshold
@@ -122,10 +123,43 @@ def _attach_bank(units: pd.DataFrame, bank: pd.DataFrame, links: pd.DataFrame, l
     return out
 
 
+def normalize_name(name: Any) -> str:
+    """A name as compared across feeds: no diacritics, upper case, single spaces ('Bùi Văn Hải' -> 'BUI VAN HAI')."""
+    if name is None or (not isinstance(name, str) and pd.isna(name)):
+        return ""
+    text = str(name).replace("đ", "d").replace("Đ", "D")
+    text = "".join(c for c in unicodedata.normalize("NFD", text) if not unicodedata.combining(c))
+    return " ".join(re.sub(r"[^0-9A-Za-z]+", " ", text).upper().split())
+
+
+def payer_names(bank: pd.DataFrame, pattern: str | None) -> pd.Series | None:
+    """Each bank row's payer: the payer_name column, else extracted from the description; None without either."""
+    if PAYER_NAME in bank.columns:
+        return bank[PAYER_NAME]
+    if pattern is None:
+        return None
+    return bank["description"].astype(str).str.extract(pattern)["payer"]
+
+
+def _payer_differs(pairs: pd.DataFrame, units: pd.DataFrame, bank: pd.DataFrame, ctx: FunnelContext) -> pd.Series:
+    """True for pairs whose customer and bank payer both have a name, and the names differ after normalizing."""
+    payers = payer_names(bank, ctx.policy.payer_pattern)
+    if payers is None or CUSTOMER_NAME not in units.columns:
+        return pd.Series(False, index=pairs.index)
+    customer = pairs["unit_id"].map(units.set_index("unit_id")[CUSTOMER_NAME]).map(normalize_name)
+    payer = payers.loc[pairs["bank_pos"]].map(normalize_name).set_axis(pairs.index)
+    return customer.ne("") & payer.ne("") & customer.ne(payer)
+
+
 def link_constrained(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
-    """Pass 2: same currency, amount within tolerance, date within the window; unique on both sides only."""
+    """Pass 2: same currency, amount within tolerance, date within the window; unique on both sides only.
+
+    A credit from a different payer than the order's customer (both named) is never linked here;
+    it can still be proposed in pass 3.
+    """
     pairs = _candidate_pairs(units, ctx)
     pairs = pairs[pairs["day_gap"] <= ctx.policy.link_date_window_days]
+    pairs = pairs[~_payer_differs(pairs, units, _bank_frame(ctx), ctx)]
     unique = ~pairs["unit_id"].duplicated(keep=False) & ~pairs["bank_pos"].duplicated(keep=False)
     linked = _attach_bank(units, _bank_frame(ctx), pairs[unique], "constrained")
     return pass_on(linked)
