@@ -29,6 +29,24 @@ from recon.evaluation import attach_truth, link_metrics, metrics
 from recon.funnel import RULE_VERSION, STEPS, FunnelContext, build_units, run_funnel
 from recon.funnel.fx import read_rate_table
 from recon.guidance import Guidance, guide
+from recon.handoff import (
+    ACTION_LABELS,
+    ACTIONS,
+    CONFIRM,
+    MARK_REFUND,
+    NOTE_REQUIRED,
+    OVERRIDE,
+    REOPEN,
+    RESOLVING_ACTIONS,
+    WRITE_OFF,
+    AuditEntry,
+    AuditLog,
+    close_status,
+    handoff_metrics,
+    unresolved_queue,
+    resolved_items,
+    run_key,
+)
 from recon.funnel.orphans import orphan_counts, reverse_pass
 from recon.funnel.payout_search import channel_tie_outs, search_batches
 from recon.funnel.remittance import remit_batches, remittance_links
@@ -92,6 +110,10 @@ __all__ = [
     # results and schema
     "ReconRun", "AUTO_ACCEPT", "REVIEW", "EXCEPTION", "FEEDS", "FEED_LABELS", "FILE_EXTENSIONS", "AMOUNT_COLUMNS",
     "ROW_HASH", "SOURCE_ROW",
+    # expert handoff: resolution actions, audit log, metrics
+    "AuditLog", "AuditEntry", "ACTIONS", "RESOLVING_ACTIONS", "ACTION_LABELS", "NOTE_REQUIRED",
+    "CONFIRM", "OVERRIDE", "WRITE_OFF", "MARK_REFUND", "REOPEN",
+    "unresolved_queue", "resolved_items", "handoff_metrics", "close_status", "run_key",
 ]
 
 

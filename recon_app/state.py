@@ -9,6 +9,8 @@ Session keys (the contract between wizard pages):
 - ``health`` (HealthReport | None): the latest ``inspect`` result for the inputs. A Health
   page sets it; Run disables itself while it reports a closed gate.
 - ``recon_run`` (ReconRun | None): the latest ``run`` result for the inputs.
+- ``audit_log_path`` (str): the append-only audit log of expert resolution actions. Defaults to
+  ``$RECON_AUDIT_LOG``, else ``data/audit/audit_log.jsonl``; it lives on disk so it survives a reload.
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import os
 import zipfile
 from collections.abc import Mapping
 from dataclasses import replace
@@ -25,6 +28,7 @@ from pathlib import Path
 import streamlit as st
 
 from recon.pipeline import (
+    AuditLog,
     DraftConfig,
     HealthReport,
     MappingProfile,
@@ -42,7 +46,9 @@ ROOT = Path(__file__).parents[1]
 BENCHMARK_SOURCES = str(ROOT / "data" / "generated")
 BENCHMARK_CONFIG = ROOT / "configs" / "olist_benchmark.json"
 
-SOURCES, CONFIG, HEALTH, RUN = "sources", "config", "health", "recon_run"
+DEFAULT_AUDIT_LOG = ROOT / "data" / "audit" / "audit_log.jsonl"
+
+SOURCES, CONFIG, HEALTH, RUN, AUDIT = "sources", "config", "health", "recon_run", "audit_log_path"
 
 
 def init() -> None:
@@ -52,6 +58,12 @@ def init() -> None:
         st.session_state[CONFIG] = load_config(BENCHMARK_CONFIG)
     st.session_state.setdefault(HEALTH, None)
     st.session_state.setdefault(RUN, None)
+    st.session_state.setdefault(AUDIT, os.environ.get("RECON_AUDIT_LOG") or str(DEFAULT_AUDIT_LOG))
+
+
+def audit_log() -> AuditLog:
+    """The audit log, read fresh from disk so every page sees the latest actions."""
+    return AuditLog(st.session_state[AUDIT])
 
 
 def inputs() -> tuple[Sources, RunConfig]:

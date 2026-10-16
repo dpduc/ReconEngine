@@ -12,10 +12,18 @@ from recon.config import RunConfig
 from recon.pipeline import inspect
 
 from test_ingest_formats import RENAMED_BANK, RENAMED_OMS, RENAMED_SHIP
-from test_pipeline import write_sources
+from test_pipeline import acknowledged, write_sources
 
 APP = str(Path(__file__).parents[1] / "app.py")
 OLIST = Path(__file__).parents[1] / "data" / "generated"
+
+
+@pytest.fixture(autouse=True)
+def audit_log(tmp_path, monkeypatch) -> Path:
+    """Each test writes its own audit log, never the repo's."""
+    path = tmp_path / "audit" / "audit_log.jsonl"
+    monkeypatch.setenv("RECON_AUDIT_LOG", str(path))
+    return path
 
 
 def upload(at: AppTest, files: dict[str, tuple[str, bytes]]) -> AppTest:
@@ -135,6 +143,45 @@ def test_run_then_review_without_exceptions(tmp_path):
     # The top-ranked record is traced to its source rows through row hashes.
     shown = {frame.value.loc["row_hash", "value"] for frame in at.dataframe if "row_hash" in frame.value.index}
     assert shown == set(run.exception_queue.iloc[0]["input_row_hashes"].split("|"))
+
+
+def test_review_action_is_logged_leaves_the_queue_and_survives_a_reload(tmp_path, audit_log):
+    def started() -> AppTest:
+        at = AppTest.from_file(APP, default_timeout=60)
+        at.session_state["sources"] = str(tmp_path)
+        at.session_state["config"] = acknowledged(tmp_path, write_sources(tmp_path))
+        at.run()
+        at.switch_page("app_pages/run.py").run()
+        at.button(key="run").click().run()
+        at.switch_page("app_pages/review.py").run()
+        assert not at.exception
+        return at
+
+    at = started()
+    queue = at.session_state["recon_run"].exception_queue
+    top = queue.iloc[0]["record_ref"]
+    assert len(at.dataframe(key="review_table").value) == len(queue)
+    at.text_input(key="review_actor").input("ana")
+    at.text_input(key="review_note").input("claimed from the payer")
+    at.selectbox(key="review_action").set_value("write_off")
+    at.button(key="review_submit").click().run()
+    assert not at.exception and not at.error
+    assert top not in set(at.dataframe(key="review_table").value["record_ref"])
+
+    # A fresh session (a reload) reads the same log: the item stays resolved.
+    at = started()
+    assert top not in set(at.dataframe(key="review_table").value["record_ref"])
+    at.segmented_control(key="review_view").set_value("Resolved").run()
+    resolved = at.dataframe(key="review_table").value
+    assert list(resolved["record_ref"]) == [top] and list(resolved["resolution"]) == ["write_off"]
+
+    at.switch_page("app_pages/handoff.py").run()
+    assert not at.exception
+    metrics = {m.label: m.value for m in at.metric}
+    assert metrics["Resolved"] == f"1 / {len(queue)}"
+    assert metrics["Override rate"] == "0%"
+    [log] = [frame.value for frame in at.dataframe if "event" in frame.value]
+    assert list(log["event"]) == ["queued", "write_off"] and list(log["actor"]) == ["", "ana"]
 
 
 def test_uploads_stay_in_memory():

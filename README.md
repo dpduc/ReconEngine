@@ -7,10 +7,11 @@ applied to the raw files. Each order then goes through an ordered funnel of
 rules, and the result can be traced back to the exact input rows.
 
 ```
- your feeds ──► 1. LOAD ──► 2. HEALTH ──► 3. FIX ──► 4. RUN ──► 5. REVIEW
- (csv/xlsx/     mapping +   blocking /    resolutions  funnel,     exception queue,
-  parquet)      lineage     warning /     in the run   one step    side-by-side
-                            info issues   config       at a time   source rows
+ your feeds ──► 1. LOAD ──► 2. HEALTH ──► 3. FIX ──► 4. RUN ──► 5. REVIEW ────► 6. HANDOFF
+ (csv/xlsx/     mapping +   blocking /    resolutions  funnel,     exception queue,  audit log,
+  parquet)      lineage     warning /     in the run   one step    side-by-side      handoff metrics,
+                            info issues   config       at a time   source rows,      close status
+                                                                   resolve actions
                                  │            ▲
                                  └─ re-check ─┘   the gate opens only when nothing is
                                                   blocking and every warning is acknowledged
@@ -44,7 +45,8 @@ streamlit run app.py
 | **Health** | The Health Report groups issues by severity (blocking / warning / info), with affected-row counts, sample rows and profiles. Each issue explains in plain language what was found and what happens to the affected records, and warns when it touches an implausibly large share of a file. It can be downloaded as JSON or as a standalone HTML page, both including this guidance. |
 | **Fix** | Issues are split into **Needs your decision** (blocking issues, uncovered order statuses, currency mismatches) and **Sign-off only** (findings the run already flags as exceptions). Each issue has a recommended option preselected, with the reason. Sign-off issues can be acknowledged together with one note. Each choice is written into the run config and the checks run again. The run config can be downloaded. |
 | **Run** | Available only once the gate is open. Runs the funnel and shows the counts at each step. |
-| **Review** | The exception queue (EXCEPTION and REVIEW units plus orphan records) is ranked by amount at risk, then age. For any unit you can see its OMS, bank and 3PL rows side by side, and download the full results bundle. A separate view lists the **close watchlist**: units auto-accepted with a note (e.g. installment interest), to revisit first if the period cannot be closed. |
+| **Review** | The exception queue (EXCEPTION and REVIEW units plus orphan records) is ranked by amount at risk, then age. For any record you can see its OMS, bank and 3PL rows side by side, with a recommended action, and record a **resolution action**: confirm, override (match to a record you choose), write off, or mark as refund. Every action goes to the append-only audit log, and resolved records leave the unresolved queue (reopen puts one back). A separate view lists the **close watchlist**: units auto-accepted with a note (e.g. installment interest), to revisit first if the period cannot be closed. The full results bundle can be downloaded. |
+| **Handoff** | **Close status**: what still blocks closing the period (unresolved records per reason code, by amount at risk), with the close watchlist listed first to revisit. **Handoff metrics**, computed from the audit log: override rate (engine disagreement) and median time to resolution per reason code, aging of unresolved records, throughput per day, first-touch resolution rate and evidence completeness. The audit log can be downloaded. |
 
 The **Benchmark** pages (executive overview, data contract, model diagnostics,
 Olist source explorer) show the bundled Olist benchmark.
@@ -74,6 +76,30 @@ outcome.open_items       # OPEN units as OMS rows with their due date: the next 
 outcome.bundle()         # decisions, triage queue, exception queue, orphans, close watchlist, funnel, excluded rows,
                          # settlement batches, open items, manifest
 ```
+
+### Expert handoff
+
+```python
+from recon.pipeline import AuditLog, OVERRIDE, close_status, handoff_metrics, unresolved_queue
+
+log = AuditLog("data/audit/audit_log.jsonl")   # append-only JSON Lines, created on the first write
+log.record(outcome, "oms", "ORD2024-0000003", OVERRIDE, actor="ana", note="paid by P9", matched_ref="P9")
+unresolved_queue(outcome, log)   # the exception queue minus resolved records, with recommended actions
+handoff_metrics(outcome, log)    # override rate, time to resolution, aging, throughput, first touch, evidence
+close_status(outcome, log)       # blockers per reason code; revisit_first = the close watchlist
+```
+
+Each log entry records who, when, the action, the note, the record matched to (override) and the engine's
+decision at the time (decision, reason codes, deciding step, amount at risk). Nothing is rewritten: a changed
+mind is a `reopen` followed by a new action. Records are keyed by a **run key**, the hash of the input files and
+rule version, so rerunning the same data keeps its queue and resolutions. Time to resolution runs from when the
+queue was first shown (a `queued` entry). Override rate is the share of resolved records whose resolution is an
+override: on real data, where there is no ground truth, it is the proxy for the engine's precision.
+
+- **First-touch resolution:** resolved by their only action, never reopened.
+- **Evidence completeness:** the record has traced source rows, an explanation and a recommended action.
+
+The app keeps the log at `data/audit/audit_log.jsonl` (not committed), or at `$RECON_AUDIT_LOG`.
 
 ### Run config
 
@@ -301,6 +327,7 @@ src/recon/
 ├── resolutions.py    # applies resolutions: remap, exclusions, duplicates, dates, status policy
 ├── funnel/           # ordered steps: eligibility, linking, routing, rules, decision, orphans
 ├── results.py        # ReconRun, exception queue, export bundle
+├── handoff.py        # resolution actions, append-only audit log, handoff metrics, close status
 ├── evaluation.py     # ground truth, per-reason-code metrics
 ├── olistdata.py      # builds the Olist benchmark feeds
 ├── perf.py           # runtime and cost harness, writes reports/performance.md
@@ -325,7 +352,7 @@ tests of the wizard. The benchmark tests need `data/generated/`; see Quick start
 
 ## Not yet in scope
 
-- **Exception resolution actions:** force match, write-off and refund, with an audit log.
+- **Shared audit log:** the log is a local file, so experts working on different machines don't share it.
 - **Infrastructure:** PostgreSQL sources, and dedup across repeated ingests of the same file.
 - **Matching beyond one-to-one:** telling a payout's true orders apart without its settlement report (see [Payouts without a settlement report](#payouts-without-a-settlement-report)).
 - **Packaging:** Docker.
