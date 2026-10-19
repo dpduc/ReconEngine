@@ -307,7 +307,7 @@ def render_report(samples: dict[int, list[Sample]], cost: CostModel = CostModel(
               "| Compute + memory per 1,000 units ($) | Storage per 1,000 units ($) | Total per 1,000 units ($) "
               "| Compute / memory / storage share |",
               "|---|---|---|---|---|---|---|---|---|---|"]
-    for size, runs in samples.items():
+    for runs in samples.values():
         costs = _median_costs(runs, cost)
         per_1000 = pd.DataFrame([{name: value / max(r.units, 1) * 1000 for name, value in cost.per_run(r).items()}
                                  for r in runs]).median()

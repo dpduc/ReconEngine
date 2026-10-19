@@ -1091,12 +1091,12 @@ def build_chain(olist: pd.DataFrame, market: Market, profile: Profile, seed: int
         low, high = start + pd.DateOffset(months=number), start + pd.DateOffset(months=number + 1)
 
         def in_period(days: pd.Series) -> pd.Series:
-            return (days >= low) & (days < high)
+            return (days >= low) & (days < high)  # noqa: B023 -- called within this iteration
 
         oms = orders[in_period(pd.to_datetime(orders["ordered_at"]))]
         statement = bank[in_period(pd.to_datetime(bank["value_date"]))]
         reports = {}
-        for name, (order_column, payout_column, _) in seller.SETTLEMENT_KEYS.items():
+        for name, (_, payout_column, _) in seller.SETTLEMENT_KEYS.items():
             report = frames[name]
             reports[name] = report[in_period(pd.to_datetime(report[payout_column].astype(str).map(paid_on)))]                 if len(report) else report
         listed = (picked < high) & ((picked >= low) | remitted_on.isna() | (remitted_on >= low))

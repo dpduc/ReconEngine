@@ -146,7 +146,6 @@ def link_metrics(results: pd.DataFrame, truth: pd.DataFrame,
         return {"true_links": int(len(frame)), "found": int(frame["found"].sum()),
                 "recall": _ratio(int(frame["found"].sum()), len(frame))}
 
-    not_scored = truth[~(linkable & in_run)]
     bank_truth = scored_truth[scored_truth["feed"] == "bank"]
     true_bank = set(zip(bank_truth["record_key"], bank_truth["order_id"]))
     return {

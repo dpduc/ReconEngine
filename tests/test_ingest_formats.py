@@ -1,6 +1,5 @@
 """Real-world exports: file formats, CSV dialects, mapping suggestion, draft configs, profiles."""
 
-from dataclasses import replace
 from pathlib import Path
 
 import pandas as pd
@@ -87,7 +86,7 @@ RENAMED_FILES = {"oms": "orders.csv", "bank": "bank.csv", "logistics": "3pl.csv"
 
 
 def _write_renamed(folder: Path, bank: str = RENAMED_BANK) -> None:
-    for (feed, name), text in zip(RENAMED_FILES.items(), (RENAMED_OMS, bank, RENAMED_SHIP)):
+    for name, text in zip(RENAMED_FILES.values(), (RENAMED_OMS, bank, RENAMED_SHIP)):
         (folder / name).write_text(text, encoding="utf-8")
 
 

@@ -7,7 +7,7 @@ import pandas as pd
 from recon.config import Resolution, RunConfig
 from recon.pipeline import inspect, run
 
-from test_pipeline import BANK, OMS, SHIP, acknowledged, write_sources
+from test_pipeline import BANK, OMS, acknowledged, write_sources
 
 DUP_OMS = OMS + "ORD2024-0000001,T1,PREPAID,100.00,2024-01-05T10:00:00,delivered\n"
 

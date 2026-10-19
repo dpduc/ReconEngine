@@ -1,3 +1,7 @@
+## Checks
+
+`ruff check .` runs as a pre-commit hook; CI runs it plus `pytest`. The full suite takes ~9 minutes, so run the test files you touched while iterating.
+
 ## Agent skills
 
 ### Issue tracker
