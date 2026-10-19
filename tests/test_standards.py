@@ -9,7 +9,8 @@ ROOT = Path(__file__).resolve().parents[1]
 ENGINE = [*(ROOT / "src" / "recon").rglob("*.py"), *(ROOT / "recon_app").rglob("*.py"),
           *(ROOT / "app_pages").rglob("*.py"), ROOT / "app.py"]
 # schema.py defines the names; the generators write ground-truth labels as data.
-EXEMPT = {"schema.py", "channeldata.py", "mockdata.py", "olistdata.py"}
+EXEMPT = {"schema.py", "mockdata.py", "olistdata.py"}
+GENERATORS = ROOT / "src" / "recon" / "channeldata"
 
 
 def _decision_literals(path: Path) -> list[str]:
@@ -22,5 +23,6 @@ def _decision_literals(path: Path) -> list[str]:
 
 
 def test_decision_names_are_imported_from_schema():
-    found = [hit for path in ENGINE if path.name not in EXEMPT for hit in _decision_literals(path)]
+    found = [hit for path in ENGINE if path.name not in EXEMPT and GENERATORS not in path.parents
+             for hit in _decision_literals(path)]
     assert not found, "use the constants in recon.schema:\n" + "\n".join(found)

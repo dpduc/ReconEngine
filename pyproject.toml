@@ -35,4 +35,4 @@ select = ["E4", "E7", "E9", "F", "B"]
 per-file-ignores = {"tests/*" = ["E731", "B905"], "notebooks/*" = ["B905"]}
 
 [tool.ruff.lint.flake8-bugbear]
-extend-immutable-calls = ["recon.perf.CostModel", "recon.channeldata.VietnamAssumptions"]
+extend-immutable-calls = ["recon.perf.CostModel", "recon.channeldata.assumptions.VietnamAssumptions"]

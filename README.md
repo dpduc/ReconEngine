@@ -354,7 +354,11 @@ src/recon/
 ├── olistdata.py      # builds the Olist benchmark feeds
 ├── perf.py           # runtime and cost harness, writes reports/performance.md
 ├── timing.py         # stage timer and per-run peak memory
-├── channeldata.py    # builds the Vietnamese multi-channel sets (test/vn) and their labels (test/vn/labels)
+├── channeldata/      # builds the Vietnamese multi-channel sets (test/vn) and their labels (test/vn/labels)
+│   ├── seller.py     #   plumbing shared by every market's seller
+│   ├── vietnam.py, brazil.py  # one seller per market
+│   ├── build.py      #   one set, or a chain of periods
+│   └── sets.py       #   configs, labels, baselines, writing sets
 └── mockdata.py       # synthetic feed generator
 app.py, app_pages/, recon_app/   # Streamlit wizard over recon.pipeline
 configs/olist_benchmark.json     # benchmark run config
