@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.17", "pre-commit>=4"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -25,3 +25,14 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src", "."]
+
+[tool.ruff]
+extend-exclude = [".claude"]
+
+[tool.ruff.lint]
+# Rules that catch bugs, not style: pyflakes, pycodestyle errors, bugbear.
+select = ["E4", "E7", "E9", "F", "B"]
+per-file-ignores = {"tests/*" = ["E731", "B905"], "notebooks/*" = ["B905"]}
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["recon.perf.CostModel", "recon.channeldata.assumptions.VietnamAssumptions"]

@@ -49,7 +49,7 @@ def per_reason_code(results: pd.DataFrame) -> dict[str, dict[str, Any]]:
         if "order_amount" in scored else [0.0] * len(scored)
     out: dict[str, dict[str, Any]] = {}
     for code in sorted(set().union(*predicted, *actual)):
-        flags = [(code in p, code in a, amount) for p, a, amount in zip(predicted, actual, amounts)]
+        flags = [(code in p, code in a, amount) for p, a, amount in zip(predicted, actual, amounts, strict=True)]
         n_pred, n_true = sum(p for p, _, _ in flags), sum(a for _, a, _ in flags)
         hits = sum(p and a for p, a, _ in flags)
         money_pred = sum(amount for p, _, amount in flags if p)
@@ -108,7 +108,7 @@ def _candidate_metrics(results: pd.DataFrame, true_bank: set[tuple[str, str]]) -
         return {"units": 0, "best_correct": None, "any_correct": None}
     proposed = results[results["link_candidates"].notna()]
     best = any_ = 0
-    for order_id, listed in zip(proposed["order_id"].astype(str), proposed["link_candidates"]):
+    for order_id, listed in zip(proposed["order_id"].astype(str), proposed["link_candidates"], strict=True):
         refs = [item.rsplit(":", 1)[0] for item in str(listed).split("|") if item]
         best += bool(refs) and (refs[0], order_id) in true_bank
         any_ += any((ref, order_id) in true_bank for ref in refs)
@@ -146,9 +146,8 @@ def link_metrics(results: pd.DataFrame, truth: pd.DataFrame,
         return {"true_links": int(len(frame)), "found": int(frame["found"].sum()),
                 "recall": _ratio(int(frame["found"].sum()), len(frame))}
 
-    not_scored = truth[~(linkable & in_run)]
     bank_truth = scored_truth[scored_truth["feed"] == "bank"]
-    true_bank = set(zip(bank_truth["record_key"], bank_truth["order_id"]))
+    true_bank = set(zip(bank_truth["record_key"], bank_truth["order_id"], strict=True))
     return {
         "overall": {**precision(predicted), **recall(scored_truth)},
         "per_pass": {f"{feed}:{link_pass}": precision(group)

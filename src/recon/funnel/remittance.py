@@ -94,7 +94,7 @@ def _measure(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     out["batch_bank_pos"] = out["batch_id"].map(batches["bank_pos"])
     collected = out["cod_collected"].fillna(0)
     out["cod_amount_delta"] = collected - out["order_amount"].fillna(0)
-    out["expected_cod_fee"] = [currency_fee(x, ctx.policy.cod_fee_bps, c) for x, c in zip(collected, fee_currency(out))]
+    out["expected_cod_fee"] = [currency_fee(x, ctx.policy.cod_fee_bps, c) for x, c in zip(collected, fee_currency(out), strict=True)]
     out["cod_fee_delta"] = out["cod_fee"].fillna(0) - out["expected_cod_fee"]
     return out
 

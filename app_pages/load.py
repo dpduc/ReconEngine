@@ -23,7 +23,7 @@ CONFIG = "config.json"
 def pick_uploads() -> tuple[dict[str, bytes], dict[str, str]] | None:
     columns = st.columns(len(FEED_LABELS))
     uploads = {feed: column.file_uploader(label, type=TYPES, key=f"upload_{feed}")
-               for column, (feed, label) in zip(columns, FEED_LABELS.items())}
+               for column, (feed, label) in zip(columns, FEED_LABELS.items(), strict=True)}
     if not all(uploads.values()):
         return None
     return state.upload_sources(uploads)
@@ -64,7 +64,7 @@ def pick_folder() -> tuple[str, dict[str, str]] | None:
         return None
     columns = st.columns(len(FEED_LABELS))
     files = {feed: column.selectbox(label, names, index=None, key=f"folder_{feed}")
-             for column, (feed, label) in zip(columns, FEED_LABELS.items())}
+             for column, (feed, label) in zip(columns, FEED_LABELS.items(), strict=True)}
     if not all(files.values()):
         return None
     return str(path), files

@@ -197,7 +197,7 @@ def unresolved_queue(outcome: ReconRun, log: AuditLog) -> pd.DataFrame:
     """The exception queue without the items resolved in `log`, in queue order, with recommendations."""
     queue = with_recommendations(outcome.exception_queue)
     resolved = _item_state(log.entries(), run_key(outcome))
-    keep = [(t, str(r)) not in resolved for t, r in zip(queue["record_type"], queue["record_ref"])]
+    keep = [(t, str(r)) not in resolved for t, r in zip(queue["record_type"], queue["record_ref"], strict=True)]
     return queue[keep].reset_index(drop=True)
 
 
@@ -253,11 +253,11 @@ def handoff_metrics(outcome: ReconRun, log: AuditLog, now: str | None = None) ->
         resolved["hours"] = float("nan")
     touches = actions.groupby(["record_type", "record_ref"]).size()
     resolved["first_touch"] = [touches.get((t, r), 0) == 1 for t, r in zip(resolved["record_type"],
-                                                                             resolved["record_ref"])]
-    is_resolved = {(t, r) for t, r in zip(resolved["record_type"], resolved["record_ref"])}
+                                                                             resolved["record_ref"], strict=True)]
+    is_resolved = {(t, r) for t, r in zip(resolved["record_type"], resolved["record_ref"], strict=True)}
     queue = queue.assign(code=queue["reason_codes"].map(primary_code),
                          resolved=[(t, str(r)) in is_resolved for t, r in zip(queue["record_type"],
-                                                                               queue["record_ref"])])
+                                                                               queue["record_ref"], strict=True)])
     unresolved_age = (now_at - queued_at).total_seconds() / 3600 if queued_at is not None else None
 
     per_code: dict[str, dict[str, Any]] = {}

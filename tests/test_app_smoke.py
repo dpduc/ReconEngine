@@ -196,7 +196,7 @@ def test_uploads_stay_in_memory():
 
 
 def test_local_folder_is_read_in_place(tmp_path):
-    for feed, (name, content) in renamed().items():
+    for name, content in renamed().values():
         (tmp_path / name).write_bytes(content)
     at = AppTest.from_file(APP, default_timeout=60).run()
     at.switch_page("app_pages/load.py").run()

@@ -44,7 +44,7 @@ def _read(source_dir: Path, name: str) -> pd.DataFrame:
 def _rename_ids(frame: pd.DataFrame, key: pd.Series, columns: list[str], new: dict[str, str]) -> pd.DataFrame:
     """Replace each row's order id (`key`) with its new id inside `columns`; rows without an id stay."""
     return frame.assign(**{column: [value.replace(old, new.get(old, old)) if old else value
-                                    for value, old in zip(frame[column], key)] for column in columns})
+                                    for value, old in zip(frame[column], key, strict=True)] for column in columns})
 
 
 def scale_benchmark(source_dir: str | Path, out_dir: str | Path, units: int) -> Path:
@@ -90,7 +90,7 @@ def scale_benchmark(source_dir: str | Path, out_dir: str | Path, units: int) -> 
     frames["truth"] = frames["truth"].assign(unit_id=lambda t: [str(i) for i in range(1, len(t) + 1)])
     out_dir.mkdir(parents=True, exist_ok=True)
     for name, frame in zip(FILES, (frames["oms"], frames["bank"], frames["logistics"], frames["truth"],
-                                   frames["links"])):
+                                   frames["links"]), strict=True):
         frame.to_csv(out_dir / name, index=False)
     marker.write_text(json.dumps(stamp), encoding="utf-8")
     return out_dir
@@ -220,7 +220,7 @@ def report(base_dir: str | Path, sizes: list[int], repeats: list[int], config_pa
     """Measure each size `repeats` times (each in a fresh process) and return a markdown report."""
     work_dir, config_path = Path(work_dir), Path(config_path).resolve()
     samples: dict[int, list[Sample]] = {}
-    for size, count in zip(sizes, pair_repeats(sizes, repeats)):
+    for size, count in zip(sizes, pair_repeats(sizes, repeats), strict=True):
         scaled = scale_benchmark(base_dir, work_dir / f"scaled_{size}", size)
         samples[size] = [_measure_in_subprocess(scaled, config_path) for _ in range(count)]
 
@@ -307,7 +307,7 @@ def render_report(samples: dict[int, list[Sample]], cost: CostModel = CostModel(
               "| Compute + memory per 1,000 units ($) | Storage per 1,000 units ($) | Total per 1,000 units ($) "
               "| Compute / memory / storage share |",
               "|---|---|---|---|---|---|---|---|---|---|"]
-    for size, runs in samples.items():
+    for runs in samples.values():
         costs = _median_costs(runs, cost)
         per_1000 = pd.DataFrame([{name: value / max(r.units, 1) * 1000 for name, value in cost.per_run(r).items()}
                                  for r in runs]).median()

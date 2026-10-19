@@ -8,7 +8,7 @@ import pytest
 from recon.config import Channel, FeedSpec, Policy, RunConfig
 from recon.pipeline import inspect, run
 
-from test_funnel_order import BANK_HEADER, SHIP_HEADER, shipment
+from test_funnel_order import BANK_HEADER, SHIP_HEADER
 from test_pipeline import acknowledged
 
 OMS_HEADER = "order_id,tracking_no,payment_method,order_amount,ordered_at,order_status,channel\n"

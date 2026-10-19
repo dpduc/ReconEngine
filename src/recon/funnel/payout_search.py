@@ -60,7 +60,7 @@ def expected_net(orders: pd.DataFrame, channel: Channel) -> pd.Series:
     if channel.fee_bps is None:
         return pd.Series(float("nan"), index=orders.index)
     fees = [currency_fee(g, channel.fee_bps, c) if pd.notna(g) else float("nan")
-            for g, c in zip(gross, fee_currency(orders))]
+            for g, c in zip(gross, fee_currency(orders), strict=True)]
     return gross - pd.Series(fees, index=orders.index, dtype=float)
 
 
@@ -133,14 +133,14 @@ def search_batches(feeds: dict[str, pd.DataFrame], ctx: FunnelContext) -> Settle
         nets = expected_net(orders, channel)
         paid_on = ctx.dates("bank", bank.loc[credits["bank_pos"], "value_date"], utc=True).dt.tz_convert(None)
         tolerance = channel.tolerance(ctx.policy) * MAX_POOL
-        for (pos, payout_id), day in zip(credits.itertuples(index=False, name=None), paid_on.dt.normalize()):
+        for (pos, payout_id), day in zip(credits.itertuples(index=False, name=None), paid_on.dt.normalize(), strict=True):
             credit = bank.loc[pos]
             placed = ordered_on.loc[orders.index]
             pool = orders[(placed <= day) & (placed >= day - _window(channel))]
             if channel.fee_bps is None:
                 sets, search = [], "the channel has no fee terms (fee_bps), so no order's net is known"
             else:
-                sets, search = find_sets(list(zip(pool["order_id"].astype(str), nets.loc[pool.index])),
+                sets, search = find_sets(list(zip(pool["order_id"].astype(str), nets.loc[pool.index], strict=True)),
                                          float(credit["credit_amount"]), tolerance)
             claimed.add(int(credit[SOURCE_ROW]))
             row = {"settlement_feed": None, "channel": name, "payout_id": payout_id, "txn_ref": credit["txn_ref"],
@@ -177,12 +177,12 @@ def _payout_candidates(units: pd.DataFrame, batches: pd.DataFrame, ctx: FunnelCo
     delivery = pd.Timedelta(days=delivery_days(ctx))
     listed = []
     for name, order_id, day in zip(units[CHANNEL].fillna("").astype(str).str.strip(), units["order_id"].astype(str),
-                                   ordered_on):
+                                   ordered_on, strict=True):
         channel = ctx.marketplaces.get(name)
         mine = batches[batches["channel"].eq(name)] if channel is not None else batches.iloc[0:0]
         mine = mine[(mine["value_day"] >= day) & (mine["value_day"] <= day + _window(channel or Channel()))]
         candidates = [(ref, paid, sets) for ref, paid, orders, sets in zip(
-            mine["txn_ref"], mine["value_day"], mine["candidate_orders"], mine["candidate_sets"])
+            mine["txn_ref"], mine["value_day"], mine["candidate_orders"], mine["candidate_sets"], strict=True)
                       if order_id in str(orders).split("|")]
         expected = day + delivery + pd.Timedelta(days=(channel or Channel()).release_days)
         span = _window(channel or Channel()).days + 1

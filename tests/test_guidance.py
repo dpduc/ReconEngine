@@ -8,7 +8,7 @@ from recon.pipeline import ACKNOWLEDGE, DUPLICATE_STRATEGY, SET_STATUS_POLICY, g
 from test_currency import MISLABELLED_BANK
 from test_currency import OMS as CURRENCY_OMS
 from test_currency import SHIP as CURRENCY_SHIP
-from test_pipeline import BANK, MAPPING, OMS, SHIP, write_sources
+from test_pipeline import BANK, MAPPING, OMS, write_sources
 
 # Dirty on purpose: a duplicate order, uncovered statuses, an unpaid order, a bad date.
 DIRTY_OMS = OMS.replace("2024-01-03T10:00:00,delivered", "2024-01-03T10:00:00,canceled") + (

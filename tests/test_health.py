@@ -160,7 +160,7 @@ def test_report_exports_every_issue_and_profile_as_json_and_html(tmp_path):
     assert "<script" not in page and "http" not in page  # standalone: nothing to fetch
     for issue in report.issues:
         assert issue.id in page and html.escape(issue.message) in page
-    for name, value in report.profiles.items():
+    for name in report.profiles:
         assert name in page
     assert "p99" in page and "oms.order_amount" in page
     assert "OMS has no items for &lt;this&gt; order" in page  # acknowledgement note, escaped

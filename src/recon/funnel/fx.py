@@ -28,8 +28,8 @@ def read_rate_table(data: bytes) -> pd.DataFrame:
     }).dropna()
     table = table[table["rate"] > 0]
     inverse = table.rename(columns={"from": "to", "to": "from"}).assign(rate=lambda t: 1 / t["rate"])
-    quoted = set(zip(table["from"], table["to"]))
-    inverse = inverse[[pair not in quoted for pair in zip(inverse["from"], inverse["to"])]]
+    quoted = set(zip(table["from"], table["to"], strict=True))
+    inverse = inverse[[pair not in quoted for pair in zip(inverse["from"], inverse["to"], strict=True)]]
     return pd.concat([table, inverse], ignore_index=True).sort_values("date", kind="stable")
 
 
