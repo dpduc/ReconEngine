@@ -17,4 +17,6 @@ jobs:
           cache: pip
       - run: pip install -e ".[dev]"
       - run: ruff check .
+      - name: Build the Olist benchmark feeds
+        run: python -m recon.olistdata --source "brazil ecom" --out data/generated --seed 42
       - run: pytest -q
