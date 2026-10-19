@@ -662,7 +662,7 @@ BR_TOLERANCE = 0.01 + 1e-9
 def _s10(rng: random.Random, prefix: str) -> str:
     """A Correios-style tracking code: 2 letters, 8 digits, the S10 check digit, BR."""
     digits = [rng.randrange(10) for _ in range(8)]
-    remainder = 11 - sum(d * w for d, w in zip(digits, (8, 6, 4, 2, 3, 5, 9, 7))) % 11
+    remainder = 11 - sum(d * w for d, w in zip(digits, (8, 6, 4, 2, 3, 5, 9, 7), strict=True)) % 11
     check = {10: 0, 11: 5}.get(remainder, remainder)
     return f"{prefix}{''.join(map(str, digits))}{check}BR"
 
@@ -1109,7 +1109,7 @@ def build_chain(olist: pd.DataFrame, market: Market, profile: Profile, seed: int
         records = {"bank": set(statement["txn_ref"]), "logistics": set(logistics["tracking_code"])}
         for name, (order_column, _, _) in seller.SETTLEMENT_KEYS.items():
             records[name.removesuffix("_settlement.csv")] = set(reports[name][order_column].astype(str))                 if len(reports[name]) else set()
-        kept = [key in records.get(feed, set()) for feed, key in zip(links["feed"], links["record_key"].astype(str))]
+        kept = [key in records.get(feed, set()) for feed, key in zip(links["feed"], links["record_key"].astype(str), strict=True)]
         carried = list(period_truth.loc[period_truth["expected_outcome"].eq("OPEN"), "order_id"])
         period_frames = {**frames, "oms_orders.csv": oms, "bank_statement.csv": statement,
                          "logistics_report.csv": logistics, **reports, "ground_truth.csv": period_truth,

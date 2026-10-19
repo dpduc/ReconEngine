@@ -282,7 +282,7 @@ def link_candidates(units: pd.DataFrame, ctx: FunnelContext) -> StepOutcome:
     pairs = pairs.assign(source_row=bank.loc[pairs["bank_pos"], "bank_source_row"].to_numpy())
     pairs = pairs.sort_values(["unit_id", "score", "txn_ref"], ascending=[True, False, True])
     grouped = pairs.groupby("unit_id")
-    listed = grouped.apply(lambda g: "|".join(f"{t}:{s:.4f}" for t, s in zip(g["txn_ref"], g["score"])),
+    listed = grouped.apply(lambda g: "|".join(f"{t}:{s:.4f}" for t, s in zip(g["txn_ref"], g["score"], strict=True)),
                            include_groups=False)
     candidate_rows = grouped["source_row"].agg(lambda rows: "|".join(str(int(r)) for r in rows))
     confidence = (grouped["score"].max() / grouped.size()).round(4)

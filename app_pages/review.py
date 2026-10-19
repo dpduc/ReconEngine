@@ -135,7 +135,7 @@ with st.expander("Resolve", expanded=True, icon=":material/gavel:"):
 
 rows = source_rows(record, outcome.feeds)
 oms_amount = rows["oms"][AMOUNT_COLUMNS["oms"]] if rows["oms"] is not None else None
-for column, feed in zip(st.columns(len(FEEDS)), FEEDS):
+for column, feed in zip(st.columns(len(FEEDS)), FEEDS, strict=True):
     with column, st.container(border=True):
         st.markdown(f"**{feed.upper()}**")
         row = rows[feed]

@@ -57,7 +57,7 @@ def currency_mismatch(feeds: dict[str, pd.DataFrame], config: RunConfig) -> list
                   {"feed": "bank", "source_rows": _rows(mismatched), "reason": REASON}),
         exclude_option("bank", mismatched, "Exclude these credits (they leave the reconciliation)"),
     )
-    pairs = ", ".join(f"{a} credit for a {e} order" for a, e in sorted(set(zip(actual[mask], expected[mask]))))
+    pairs = ", ".join(f"{a} credit for a {e} order" for a, e in sorted(set(zip(actual[mask], expected[mask], strict=True))))
     return [warning("currency_mismatch:bank", "currency_mismatch", "bank", bank, mask,
                     f"bank: {int(mask.sum())} credit(s) in another currency than their order ({pairs}); "
                     "amounts in different currencies are not compared", fixes)]

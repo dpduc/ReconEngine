@@ -54,7 +54,7 @@ def due_dates(units: pd.DataFrame, ctx: FunnelContext) -> pd.Series:
     names = units[CHANNEL].fillna("").astype(str).str.strip() if CHANNEL in units else pd.Series("", index=units.index)
     cod = units["payment_method"].eq("COD") if "payment_method" in units else pd.Series(False, index=units.index)
     due = []
-    for name, is_cod, order_day, delivery_day, has_shipment in zip(names, cod, ordered, delivered, shipped):
+    for name, is_cod, order_day, delivery_day, has_shipment in zip(names, cod, ordered, delivered, shipped, strict=True):
         terms = ctx.channels.get(name, Channel())
         if not (is_cod or name in ctx.marketplaces):
             due.append(order_day)

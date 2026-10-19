@@ -44,9 +44,9 @@ def _measure(units: pd.DataFrame, ctx: FunnelContext) -> pd.DataFrame:
     out["fee_bps"] = _fee_bps(out, ctx)
     prepaid_credit = out["credit_amount"].fillna(0).where(out["payment_method"].eq("PREPAID"), 0)
     currency = fee_currency(out)
-    out["expected_mdr"] = [currency_fee(x, bps, c) for x, bps, c in zip(prepaid_credit, out["fee_bps"], currency)]
+    out["expected_mdr"] = [currency_fee(x, bps, c) for x, bps, c in zip(prepaid_credit, out["fee_bps"], currency, strict=True)]
     out["expected_cod_fee"] = [currency_fee(x, policy.cod_fee_bps, c)
-                               for x, c in zip(out["cod_collected"].fillna(0), currency)]
+                               for x, c in zip(out["cod_collected"].fillna(0), currency, strict=True)]
     out["fee_delta"] = out["fee_amount"].fillna(0) - out["expected_mdr"]
     out["cod_fee_delta"] = out["cod_fee"].fillna(0) - out["expected_cod_fee"]
     out["amount_within_tolerance"] = (within(out["credit_delta"], policy.amount_tolerance)) & (
@@ -76,7 +76,7 @@ def _duplicate_payment(out: pd.DataFrame, tolerance: float) -> pd.Series:
     parts = out[SPLIT_AMOUNTS].map(lambda listed: [float(a) for a in str(listed).split("|")]
                                    if isinstance(listed, str) else [])
     one_pays = [any(abs(a - expected) <= tolerance + 1e-9 for a in amounts)
-                for amounts, expected in zip(parts, out["expected_credit"])]
+                for amounts, expected in zip(parts, out["expected_credit"], strict=True)]
     return pd.Series(one_pays, index=out.index) & (out["credit_delta"] > tolerance + 1e-9)
 
 
