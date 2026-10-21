@@ -1,5 +1,6 @@
 """In-memory sources: the same files behave identically whether read from a folder or from bytes."""
 
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -15,11 +16,17 @@ def _in_memory(folder: Path) -> dict[str, bytes]:
     return {path.relative_to(folder).as_posix(): path.read_bytes() for path in folder.rglob("*") if path.is_file()}
 
 
+def _without_load_time(report_json: str) -> str:
+    """The report minus ``ingested_at``, which differs between any two runs that straddle a second."""
+    return re.sub(r'"ingested_at": "[^"]*"', '"ingested_at": ""', report_json)
+
+
 def test_folder_and_in_memory_sources_give_identical_runs(tmp_path):
     config = write_sources(tmp_path)
     memory = _in_memory(tmp_path)
 
-    assert inspect(memory, config).to_json() == inspect(tmp_path, config).to_json()
+    assert (_without_load_time(inspect(memory, config).to_json())
+            == _without_load_time(inspect(tmp_path, config).to_json()))
     from_folder, from_memory = run(tmp_path, config), run(memory, config)
     assert from_memory.health.gate_open
     load_time = [c for c in from_folder.results if c.endswith("ingested_at")]  # differs between any two runs
