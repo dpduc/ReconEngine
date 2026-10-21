@@ -1,4 +1,4 @@
-"""SmartRecon entry point: wizard navigation over ``recon.pipeline``.
+"""ReconEngine entry point: wizard navigation over ``recon.pipeline``.
 
 Pages live in ``app_pages/`` and share state through ``recon_app.state``. Wizard steps
 run in order: Load -> Health -> Fix -> Run -> Review -> Handoff.
@@ -8,7 +8,7 @@ import streamlit as st
 
 from recon_app import state
 
-st.set_page_config(page_title="SmartRecon", page_icon=":material/search:", layout="wide")
+st.set_page_config(page_title="ReconEngine", page_icon=":material/search:", layout="wide")
 state.init()
 
 WIZARD = [
@@ -27,7 +27,7 @@ BENCHMARK = [
 ]
 page = st.navigation({"Wizard": WIZARD, "Benchmark": BENCHMARK})
 
-st.sidebar.title("SmartRecon")
+st.sidebar.title("ReconEngine")
 st.sidebar.caption("Precision-first reconciliation intelligence")
 
 page.run()
