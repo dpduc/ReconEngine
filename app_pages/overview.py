@@ -4,7 +4,7 @@ import streamlit as st
 
 from recon_app import state
 
-st.title("SmartRecon")
+st.title("ReconEngine")
 outcome = state.require_run()
 results, m = outcome.results, outcome.manifest["metrics"]
 

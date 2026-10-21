@@ -1,6 +1,6 @@
-# SmartRecon
+# ReconEngine
 
-SmartRecon reconciles three feeds against each other: OMS orders, bank/PSP
+ReconEngine reconciles three feeds against each other: OMS orders, bank/PSP
 credits and 3PL logistics reports. The data has to pass integrity checks before
 anything is matched. Every fix an analyst makes is recorded instead of being
 applied to the raw files. Each order then goes through an ordered funnel of
